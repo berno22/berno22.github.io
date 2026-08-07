@@ -105,25 +105,41 @@
     }
   }, 500);
 
-  let raf = 0, phase = 0;
+  let raf = 0, t = 0;
+  const particles = [];
+  for (let i = 0; i < 90; i++) {
+    particles.push({
+      x: Math.random() * VW,
+      v: 30 + Math.random() * 60,
+      r: 1.4 + Math.random() * 1.8,
+      o: Math.random() * Math.PI * 2
+    });
+  }
 
   function render() {
     raf = requestAnimationFrame(render);
-    phase += 0.06;
+    t += 0.016;
+    ctx.fillStyle = 'rgba(10,10,12,0.22)';
+    ctx.fillRect(0, 0, VW, VH);
     const midY = VH / 2;
-    ctx.clearRect(0, 0, VW, VH);
-    ctx.strokeStyle = '#33FF6E';
-    ctx.lineWidth = 2.5;
-    ctx.shadowBlur = 14;
-    ctx.shadowColor = 'rgba(51,255,110,0.85)';
-    ctx.beginPath();
-    for (let x = 0; x <= VW; x += 2) {
-      const w = Math.sin(x / 13 + phase);
-      const y = midY + Math.sign(w) * Math.pow(Math.abs(w), 0.5) * 34;
-      x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    const amp = 30 + 7 * Math.sin(t * 1.2);
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of particles) {
+      p.x += p.v * 0.016;
+      if (p.x > VW) p.x -= VW;
+      const w = Math.sin(p.x / 34 + t * 2.2 + p.o) * 0.7
+              + Math.sin(p.x / 13 + t * 3.4) * 0.3;
+      const y = midY + w * amp;
+      ctx.fillStyle = 'rgba(51,255,110,0.20)';
+      ctx.beginPath();
+      ctx.arc(p.x, y, p.r * 2.6, 0, 6.283);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(214,255,232,0.85)';
+      ctx.beginPath();
+      ctx.arc(p.x, y, p.r, 0, 6.283);
+      ctx.fill();
     }
-    ctx.stroke();
-    ctx.shadowBlur = 0;
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   function startVis() {
