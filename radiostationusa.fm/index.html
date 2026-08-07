@@ -66,6 +66,19 @@
   const src = 'https://vofile.ru/usa/CNBC/playlist.m3u8';
   let started = false;
 
+  let N = 52, BW = 6, GAP = 3;
+  let levels = new Float32Array(N);
+  let vel = new Float32Array(N);
+  let tgt = new Float32Array(N);
+  function rebuildBars() {
+    N = Math.min(140, Math.max(36, Math.round(VW / 24)));
+    GAP = VW > 1000 ? 4 : 3;
+    BW = (VW - (N - 1) * GAP) / N;
+    levels = new Float32Array(N);
+    vel = new Float32Array(N);
+    tgt = new Float32Array(N);
+  }
+
   function rebuild() {
     midY = VH / 2;
     hist = new Float32Array(VW + 1);
@@ -75,6 +88,7 @@
     period = PERIOD;
     amp = baseAmp;
     pen = 0;
+    rebuildBars();
   }
 
   function sizeCanvas() {
@@ -123,28 +137,110 @@
     }
   }, 500);
 
-  let phase = 0;
+  let audioCtx = null, analyser = null, dataArray = null;
+
+  function ensureCtx() {
+    if (audioCtx) return;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) {
+      audioCtx = null;
+    }
+  }
+
+  let wireTries = 0;
+  function wireAnalyser() {
+    if (analyser || !audioCtx || !started) return;
+    try {
+      let srcNode = null;
+      if (video.captureStream) {
+        const stream = video.captureStream();
+        if (!stream.getAudioTracks().length) {
+          if (wireTries++ < 12) setTimeout(wireAnalyser, 300);
+          return;
+        }
+        srcNode = audioCtx.createMediaStreamSource(stream);
+      } else {
+        srcNode = audioCtx.createMediaElementSource(video);
+        srcNode.connect(audioCtx.destination);
+      }
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.82;
+      srcNode.connect(analyser);
+      dataArray = new Uint8Array(analyser.frequencyBinCount);
+    } catch (e) {
+      analyser = null;
+    }
+  }
+
+  let phase = 0, synthStart = 0, synthetic = false;
+
+  function synthTarget(i, t) {
+    const base = 0.18 + 0.35 * Math.abs(Math.sin(t * 1.4 + i * 0.6));
+    const wob = 0.45 * Math.abs(Math.sin(t * 3.1 + Math.sin(i * 0.9 + t) * 2.2));
+    const spike = Math.pow(Math.max(0, Math.sin(t * 0.7 + i * 1.3) - 0.86) / 0.14, 2) * 0.5;
+    return Math.min(1, base + wob + spike);
+  }
+
+  function drawBar(x, y, w, h) {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, 4);
+    else ctx.rect(x, y, w, h);
+    ctx.fill();
+  }
 
   function render() {
     raf = requestAnimationFrame(render);
-    phase += 25 / VW;
+    phase += 0.016;
     const midY = VH / 2;
-    const W = VW / 32;
-    const A = VH * 0.33;
     ctx.clearRect(0, 0, VW, VH);
-    ctx.strokeStyle = '#33FF6E';
-    ctx.lineWidth = 1.5;
-    ctx.lineCap = 'round';
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = 'rgba(51,255,110,0.7)';
-    ctx.beginPath();
-    for (let x = 0; x <= VW; x += 2) {
-      const w = Math.sin(x / W + phase);
-      const y = midY + Math.sign(w) * Math.pow(Math.abs(w), 0.5) * A;
-      x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+
+    let alive = 0;
+    if (analyser && dataArray) {
+      analyser.getByteFrequencyData(dataArray);
+      for (let i = 0; i < dataArray.length; i++) alive += dataArray[i];
+      if (alive > 2000) synthetic = false;
+      if (alive === 0) {
+        if (!synthStart) synthStart = performance.now();
+        else if (performance.now() - synthStart > 700) synthetic = true;
+      } else {
+        synthStart = 0;
+      }
+    } else {
+      synthStart = 0;
+      synthetic = true;
     }
-    ctx.stroke();
+
+    for (let i = 0; i < N; i++) {
+      if (analyser && dataArray && !synthetic) {
+        const idx = Math.floor(Math.pow(i / N, 1.6) * (dataArray.length * 0.75));
+        tgt[i] = dataArray[idx] / 255;
+      } else {
+        tgt[i] = synthTarget(i, phase);
+      }
+      vel[i] += (tgt[i] - levels[i]) * 0.22;
+      vel[i] *= 0.78;
+      levels[i] += vel[i];
+      const h = Math.max(2, levels[i] * (midY - 8));
+      const x = i * (BW + GAP);
+      const y = midY - h / 2;
+      const grad = ctx.createLinearGradient(0, midY - h, 0, midY + h);
+      grad.addColorStop(0, '#eafff2');
+      grad.addColorStop(0.45, '#33FF6E');
+      grad.addColorStop(1, '#0e7d3e');
+      ctx.fillStyle = grad;
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = 'rgba(51,255,110,0.6)';
+      drawBar(x, y, BW, h);
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.shadowBlur = 0;
+      ctx.fillRect(x, y, BW, 2);
+    }
     ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(51,255,110,0.12)';
+    ctx.fillRect(0, midY - 0.5, VW, 1);
   }
 
   function startVis() {
@@ -160,9 +256,10 @@
   function togglePlay() {
     if (!started) {
       started = true;
+      ensureCtx();
       video.muted = false;
       video.play()
-        .then(() => { setStatus('Live'); startVis(); sessionStorage.setItem('cnbcAutoReload', '0'); })
+        .then(() => { setStatus('Live'); startVis(); wireAnalyser(); sessionStorage.setItem('cnbcAutoReload', '0'); })
         .catch(() => { started = false; setStatus('Tap again'); stopVis(); });
     } else {
       refresh();
