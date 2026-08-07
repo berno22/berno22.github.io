@@ -33,8 +33,8 @@
   video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   #err { margin-top: 18px; color: #f66; font-size: 12px; white-space: pre-wrap; min-height: 16px; }
   #vis {
-    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-    width: 420px; height: 150px; z-index: 0; pointer-events: none;
+    position: absolute; left: 50%; bottom: 36px; transform: translateX(-50%);
+    width: min(92vw, 1100px); height: 180px; z-index: 0; pointer-events: none;
     opacity: 0; transition: opacity .5s;
   }
   #vis.on { opacity: 1; }
@@ -59,15 +59,33 @@
   const errBox = document.getElementById('err');
   const vis = document.getElementById('vis');
   const ctx = vis.getContext('2d');
-  const VW = 420, VH = 150;
+  let VW = 420, VH = 150;
+  let PERIOD = 96, baseAmp = 40;
+  let midY = 75, hist = null, pen = 0, period = PERIOD, amp = baseAmp;
+  let raf = 0;
   const src = 'https://vofile.ru/usa/CNBC/playlist.m3u8';
   let started = false;
 
+  function rebuild() {
+    midY = VH / 2;
+    hist = new Float32Array(VW + 1);
+    for (let i = 0; i <= VW; i++) hist[i] = midY;
+    PERIOD = Math.max(48, VW / 4.4);
+    baseAmp = VH * 0.27;
+    period = PERIOD;
+    amp = baseAmp;
+    pen = 0;
+  }
+
   function sizeCanvas() {
     const dpr = window.devicePixelRatio || 1;
+    const r = vis.getBoundingClientRect();
+    VW = Math.max(1, Math.round(r.width));
+    VH = Math.max(1, Math.round(r.height));
     vis.width = VW * dpr;
     vis.height = VH * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    rebuild();
   }
   sizeCanvas();
   window.addEventListener('resize', sizeCanvas);
@@ -105,12 +123,6 @@
     }
   }, 500);
 
-  let raf = 0;
-  const PERIOD = 96;
-  const midY = VH / 2;
-  const hist = new Float32Array(VW + 1);
-  for (let i = 0; i <= VW; i++) hist[i] = midY;
-
   function ecg(u) {
     if (u < 0.04)  return (0.18 / 0.04) * u;
     if (u < 0.09)  return 0.18 * (1 - (u - 0.04) / 0.05);
@@ -124,16 +136,13 @@
     return 0;
   }
 
-  let pen = 0;
-  let period = PERIOD;
-  let amp = 40;
-
   function render() {
     raf = requestAnimationFrame(render);
     pen += 1;
+    const S = VH / 150;
 
-    period += (PERIOD * (1 + 0.06 * Math.sin(pen / 2000)) - period) * 0.02 + (Math.random() - 0.5) * 1.2;
-    amp += (40 + 5 * Math.sin(pen / 3000) - amp) * 0.03 + (Math.random() - 0.5) * 0.8;
+    period += (PERIOD * (1 + 0.06 * Math.sin(pen / 2000)) - period) * 0.02 + (Math.random() - 0.5) * 1.2 * S;
+    amp += (baseAmp * (1 + 0.12 * Math.sin(pen / 3000)) - amp) * 0.03 + (Math.random() - 0.5) * 0.8 * S;
 
     hist.copyWithin(0, 1);
     hist[VW] = midY - ecg((pen / period) % 1) * amp;
