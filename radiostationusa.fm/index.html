@@ -33,8 +33,8 @@
   video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   #err { margin-top: 18px; color: #f66; font-size: 12px; white-space: pre-wrap; min-height: 16px; }
   #vis {
-    position: absolute; left: 50%; bottom: 36px; transform: translateX(-50%);
-    width: min(92vw, 1100px); height: 180px; z-index: 0; pointer-events: none;
+    position: absolute; left: 0; right: 0; bottom: 0;
+    width: 100%; height: 110px; z-index: 0; pointer-events: none;
     opacity: 0; transition: opacity .5s;
   }
   #vis.on { opacity: 1; }
@@ -123,72 +123,28 @@
     }
   }, 500);
 
-  function ecg(u) {
-    if (u < 0.04)  return (0.18 / 0.04) * u;
-    if (u < 0.09)  return 0.18 * (1 - (u - 0.04) / 0.05);
-    if (u < 0.29)  return 0;
-    if (u < 0.305) return -0.25 * (u - 0.29) / 0.015;
-    if (u < 0.325) return -0.25 + 1.25 * (u - 0.305) / 0.020;
-    if (u < 0.345) return 1.0 - 1.35 * (u - 0.325) / 0.020;
-    if (u < 0.42)  return -0.35 * (1 - (u - 0.345) / 0.075);
-    if (u < 0.60)  return 0;
-    if (u < 0.70)  return 0.35 * Math.sin(Math.PI * (u - 0.60) / 0.10);
-    return 0;
-  }
+  let phase = 0;
 
   function render() {
     raf = requestAnimationFrame(render);
-    pen += 1;
-    const S = VH / 150;
-
-    period += (PERIOD * (1 + 0.06 * Math.sin(pen / 2000)) - period) * 0.02 + (Math.random() - 0.5) * 1.2 * S;
-    amp += (baseAmp * (1 + 0.12 * Math.sin(pen / 3000)) - amp) * 0.03 + (Math.random() - 0.5) * 0.8 * S;
-
-    hist.copyWithin(0, 1);
-    hist[VW] = midY - ecg((pen / period) % 1) * amp;
-
+    phase += 25 / VW;
+    const midY = VH / 2;
+    const W = VW / 32;
+    const A = VH * 0.33;
     ctx.clearRect(0, 0, VW, VH);
-    const g = ctx.createRadialGradient(VW / 2, midY, 2, VW / 2, midY, VH * 0.7);
-    g.addColorStop(0, 'rgba(51,255,110,0.07)');
-    g.addColorStop(1, 'rgba(51,255,110,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, VW, VH);
-
-    ctx.fillStyle = 'rgba(51,255,110,0.10)';
-    ctx.fillRect(0, midY - 0.5, VW, 1);
-
-    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#33FF6E';
+    ctx.lineWidth = 1.5;
     ctx.lineCap = 'round';
-    const layers = [
-      { from: 0.72, alpha: 1.0 },
-      { from: 0.45, alpha: 0.55 },
-      { from: 0.20, alpha: 0.28 },
-      { from: 0.00, alpha: 0.12 }
-    ];
-    for (const L of layers) {
-      const x0 = Math.floor(VW * L.from);
-      ctx.strokeStyle = '#33FF6E';
-      ctx.globalAlpha = L.alpha;
-      ctx.lineWidth = 2.5;
-      ctx.shadowBlur = L.alpha > 0.8 ? 12 : 0;
-      ctx.shadowColor = 'rgba(51,255,110,0.9)';
-      ctx.beginPath();
-      for (let x = x0; x <= VW; x++) {
-        x === x0 ? ctx.moveTo(x, hist[x]) : ctx.lineTo(x, hist[x]);
-      }
-      ctx.stroke();
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(51,255,110,0.7)';
+    ctx.beginPath();
+    for (let x = 0; x <= VW; x += 2) {
+      const w = Math.sin(x / W + phase);
+      const y = midY + Math.sign(w) * Math.pow(Math.abs(w), 0.5) * A;
+      x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     }
-    ctx.globalAlpha = 1;
+    ctx.stroke();
     ctx.shadowBlur = 0;
-
-    ctx.fillStyle = 'rgba(51,255,110,0.35)';
-    ctx.beginPath();
-    ctx.arc(VW, hist[VW], 7, 0, 6.283);
-    ctx.fill();
-    ctx.fillStyle = '#eafff2';
-    ctx.beginPath();
-    ctx.arc(VW, hist[VW], 3, 0, 6.283);
-    ctx.fill();
   }
 
   function startVis() {
