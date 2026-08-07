@@ -23,59 +23,49 @@
     70% { box-shadow: 0 0 0 14px rgba(51,255,110,0); }
     100% { box-shadow: 0 0 0 0 rgba(51,255,110,0); }
   }
-  h1 { margin: 0 0 6px; font-size: 28px; font-weight: 700; letter-spacing: .5px; }
+  h1 {
+    margin: 0 0 6px; font-size: 28px; font-weight: 700; letter-spacing: .5px;
+    cursor: pointer; user-select: none; transition: color .25s;
+  }
+  h1:hover { color: #33FF6E; }
   #status { margin: 0; color: #9a9aa2; font-size: 14px; min-height: 20px; }
   video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   #err { margin-top: 18px; color: #f66; font-size: 12px; white-space: pre-wrap; min-height: 16px; }
-  #btn {
-    margin: 26px auto 0; width: 72px; height: 72px; border-radius: 50%;
-    border: 2px solid #33FF6E; background: rgba(51,255,110,.08); color: #33FF6E;
-    cursor: pointer; display: none; align-items: center; justify-content: center;
-    transition: all .25s;
-  }
-  #btn.show { display: inline-flex; }
-  #btn:hover { background: rgba(51,255,110,.18); box-shadow: 0 0 24px rgba(51,255,110,.35); }
-  #btn svg { width: 28px; height: 28px; fill: #33FF6E; }
 </style>
 </head>
 <body>
 <div id="wrap">
   <div id="card">
     <div id="dot"></div>
-    <h1>CNBC Audio</h1>
+    <h1 id="title">CNBC Audio</h1>
     <p id="status">Loading&hellip;</p>
     <div id="err"></div>
-    <button id="btn" type="button" title="Play">
-      <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-    </button>
   </div>
   <video id="video" controls muted playsinline preload="auto"></video>
 </div>
 <script>
   const video = document.getElementById('video');
   const dot = document.getElementById('dot');
+  const title = document.getElementById('title');
   const status = document.getElementById('status');
   const errBox = document.getElementById('err');
-  const btn = document.getElementById('btn');
   const src = 'https://vofile.ru/usa/CNBC/playlist.m3u8';
+  let started = false;
 
   function refresh() { location.reload(); }
   dot.addEventListener('click', refresh);
 
   function setError(msg) { errBox.textContent = 'Error: ' + msg; }
-  function setLive() { dot.classList.add('live'); status.textContent = 'Live'; }
+  function setLive() { dot.classList.add('live'); }
   function setStatus(t) { status.textContent = t; }
 
-  btn.addEventListener('click', () => {
-    if (video.paused || video.muted) {
+  title.addEventListener('click', () => {
+    if (!started) {
+      started = true;
       video.muted = false;
       video.play()
-        .then(() => {
-          btn.title = 'Refresh';
-          btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.76-4.24L13 11h7V4z"/></svg>';
-          setStatus('Live');
-        })
-        .catch(() => setStatus('Tap to enable sound'));
+        .then(() => setStatus('Live'))
+        .catch(() => { started = false; setStatus('Tap again'); });
     } else {
       refresh();
     }
@@ -89,9 +79,7 @@
       });
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setLive();
-        btn.classList.add('show');
-        video.muted = true;
-        video.play().catch(() => {});
+        setStatus('Click "CNBC Audio" to play');
       });
       hls.loadSource(src);
       hls.attachMedia(video);
@@ -99,9 +87,7 @@
       video.src = src;
       video.addEventListener('loadedmetadata', () => {
         setLive();
-        btn.classList.add('show');
-        video.muted = true;
-        video.play().catch(() => {});
+        setStatus('Click "CNBC Audio" to play');
       });
       video.addEventListener('error', () => setError(video.error && video.error.message));
     } else {
