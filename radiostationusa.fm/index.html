@@ -213,7 +213,7 @@
       synthetic = true;
     }
 
-    ctx.globalAlpha = 0.12;
+    ctx.globalAlpha = 0.85;
     for (let i = 0; i < N; i++) {
       if (analyser && dataArray && !synthetic) {
         const idx = Math.floor(Math.pow(i / N, 1.6) * (dataArray.length * 0.75));
@@ -228,20 +228,20 @@
       const x = i * (BW + GAP);
       const y = midY - h / 2;
       const grad = ctx.createLinearGradient(0, midY - h, 0, midY + h);
-      grad.addColorStop(0, '#a8d8bd');
-      grad.addColorStop(0.5, '#3faf6b');
-      grad.addColorStop(1, '#1d6b42');
+      grad.addColorStop(0, '#3a6a4e');
+      grad.addColorStop(0.5, '#234a33');
+      grad.addColorStop(1, '#122a1d');
       ctx.fillStyle = grad;
-      ctx.shadowBlur = 4;
-      ctx.shadowColor = 'rgba(63,175,107,0.08)';
+      ctx.shadowBlur = 6;
+      ctx.shadowColor = 'rgba(35,74,51,0.25)';
       drawBar(x, y, BW, h);
-      ctx.fillStyle = 'rgba(216,255,230,0.06)';
+      ctx.fillStyle = 'rgba(150,200,170,0.25)';
       ctx.shadowBlur = 0;
       ctx.fillRect(x, y, BW, 2);
     }
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(63,175,107,0.02)';
+    ctx.fillStyle = 'rgba(35,74,51,0.08)';
     ctx.fillRect(0, midY - 0.5, VW, 1);
   }
 
