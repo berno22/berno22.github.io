@@ -107,6 +107,9 @@
 
   let raf = 0;
   const PERIOD = 96;
+  const midY = VH / 2;
+  const hist = new Float32Array(VW + 1);
+  for (let i = 0; i <= VW; i++) hist[i] = midY;
 
   function ecg(u) {
     if (u < 0.04)  return (0.18 / 0.04) * u;
@@ -121,26 +124,62 @@
     return 0;
   }
 
-  function render(ts) {
+  let pen = 0;
+  let period = PERIOD;
+  let amp = 40;
+
+  function render() {
     raf = requestAnimationFrame(render);
-    const t = ts / 1000;
-    const midY = VH / 2;
-    const amp = 36 * (1 + 0.05 * Math.sin(t * 0.6));
-    const period = PERIOD * (1 + 0.04 * Math.sin(t * 0.33));
-    const scroll = t * 110;
+    pen += 1;
+
+    period += (PERIOD * (1 + 0.06 * Math.sin(pen / 2000)) - period) * 0.02 + (Math.random() - 0.5) * 1.2;
+    amp += (40 + 5 * Math.sin(pen / 3000) - amp) * 0.03 + (Math.random() - 0.5) * 0.8;
+
+    hist.copyWithin(0, 1);
+    hist[VW] = midY - ecg((pen / period) % 1) * amp;
+
     ctx.clearRect(0, 0, VW, VH);
-    ctx.strokeStyle = '#33FF6E';
-    ctx.lineWidth = 2.2;
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = 'rgba(51,255,110,0.8)';
-    ctx.beginPath();
-    for (let x = 0; x <= VW; x += 1) {
-      const u = ((x + scroll) / period) % 1;
-      const y = midY - ecg(u) * amp;
-      x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    const g = ctx.createRadialGradient(VW / 2, midY, 2, VW / 2, midY, VH * 0.7);
+    g.addColorStop(0, 'rgba(51,255,110,0.07)');
+    g.addColorStop(1, 'rgba(51,255,110,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, VW, VH);
+
+    ctx.fillStyle = 'rgba(51,255,110,0.10)';
+    ctx.fillRect(0, midY - 0.5, VW, 1);
+
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    const layers = [
+      { from: 0.72, alpha: 1.0 },
+      { from: 0.45, alpha: 0.55 },
+      { from: 0.20, alpha: 0.28 },
+      { from: 0.00, alpha: 0.12 }
+    ];
+    for (const L of layers) {
+      const x0 = Math.floor(VW * L.from);
+      ctx.strokeStyle = '#33FF6E';
+      ctx.globalAlpha = L.alpha;
+      ctx.lineWidth = 2.5;
+      ctx.shadowBlur = L.alpha > 0.8 ? 12 : 0;
+      ctx.shadowColor = 'rgba(51,255,110,0.9)';
+      ctx.beginPath();
+      for (let x = x0; x <= VW; x++) {
+        x === x0 ? ctx.moveTo(x, hist[x]) : ctx.lineTo(x, hist[x]);
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
+    ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
+
+    ctx.fillStyle = 'rgba(51,255,110,0.35)';
+    ctx.beginPath();
+    ctx.arc(VW, hist[VW], 7, 0, 6.283);
+    ctx.fill();
+    ctx.fillStyle = '#eafff2';
+    ctx.beginPath();
+    ctx.arc(VW, hist[VW], 3, 0, 6.283);
+    ctx.fill();
   }
 
   function startVis() {
