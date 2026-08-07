@@ -11,11 +11,11 @@
          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
   #wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
           background: radial-gradient(1200px 600px at 50% -10%, #1a1f24, #0a0a0c 60%); }
-  #card { text-align: center; padding: 32px; zoom: 1.3; }
+  #card { position: relative; z-index: 1; text-align: center; padding: 32px; zoom: 1.3; }
   #dot {
     width: 16px; height: 16px; border-radius: 50%; margin: 0 auto 18px;
     background: #555; box-shadow: 0 0 0 rgba(51,255,110,0); transition: all .3s;
-    cursor: pointer; user-select: none;
+    cursor: pointer; user-select: none; position: relative; z-index: 2;
   }
   #dot.live { background: #33FF6E; box-shadow: 0 0 18px rgba(51,255,110,.8); animation: pulse 2s infinite; }
   @keyframes pulse {
@@ -25,30 +25,19 @@
   }
   h1 {
     margin: 0 0 6px; font-size: 28px; font-weight: 700; letter-spacing: .5px;
-    cursor: pointer; user-select: none; transition: color .25s;
+    cursor: pointer; user-select: none; transition: color .25s; position: relative; z-index: 2;
   }
   h1:hover { color: #33FF6E; }
-  #status { margin: 0; color: #9a9aa2; font-size: 14px; min-height: 20px; cursor: pointer; user-select: none; transition: color .25s; }
+  #status { margin: 0; color: #9a9aa2; font-size: 14px; min-height: 20px; cursor: pointer; user-select: none; transition: color .25s; position: relative; z-index: 2; }
   #status:hover { color: #33FF6E; }
   video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   #err { margin-top: 18px; color: #f66; font-size: 12px; white-space: pre-wrap; min-height: 16px; }
-  #eq { display: none; align-items: flex-end; justify-content: center; gap: 5px;
-        height: 30px; margin: 20px auto 0; }
-  #eq.on { display: flex; }
-  #eq span {
-    width: 5px; height: 100%; border-radius: 3px; background: #33FF6E;
-    transform-origin: bottom; animation: eq .9s ease-in-out infinite;
-    box-shadow: 0 0 8px rgba(51,255,110,.6);
+  #vis {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 420px; height: 150px; z-index: 0; pointer-events: none;
+    opacity: 0; transition: opacity .5s;
   }
-  #eq span:nth-child(1) { animation-duration: .8s; }
-  #eq span:nth-child(2) { animation-duration: 1.1s; animation-delay: .2s; }
-  #eq span:nth-child(3) { animation-duration: .7s; animation-delay: .1s; }
-  #eq span:nth-child(4) { animation-duration: 1s; animation-delay: .3s; }
-  #eq span:nth-child(5) { animation-duration: .85s; animation-delay: .05s; }
-  @keyframes eq {
-    0%, 100% { transform: scaleY(.35); }
-    50% { transform: scaleY(1); }
-  }
+  #vis.on { opacity: 1; }
 </style>
 </head>
 <body>
@@ -57,9 +46,9 @@
     <div id="dot"></div>
     <h1 id="title">CNBC Audio</h1>
     <p id="status">Loading&hellip;</p>
-    <div id="eq" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
     <div id="err"></div>
   </div>
+  <canvas id="vis"></canvas>
   <video id="video" controls muted playsinline preload="auto"></video>
 </div>
 <script>
@@ -68,9 +57,20 @@
   const title = document.getElementById('title');
   const status = document.getElementById('status');
   const errBox = document.getElementById('err');
-  const eq = document.getElementById('eq');
+  const vis = document.getElementById('vis');
+  const ctx = vis.getContext('2d');
+  const VW = 420, VH = 150;
   const src = 'https://vofile.ru/usa/CNBC/playlist.m3u8';
   let started = false;
+
+  function sizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    vis.width = VW * dpr;
+    vis.height = VH * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  sizeCanvas();
+  window.addEventListener('resize', sizeCanvas);
 
   function refresh() { location.reload(); }
   dot.addEventListener('click', refresh);
@@ -105,13 +105,136 @@
     }
   }, 500);
 
+  let audioCtx = null, analyser = null, dataArray = null;
+  let raf = 0;
+
+  function ensureCtx() {
+    if (audioCtx) return;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) {
+      audioCtx = null;
+    }
+  }
+
+  let wireTries = 0;
+  function wireAnalyser() {
+    if (analyser || !audioCtx || !started) return;
+    try {
+      let srcNode = null;
+      if (video.captureStream) {
+        const stream = video.captureStream();
+        if (!stream.getAudioTracks().length) {
+          if (wireTries++ < 12) setTimeout(wireAnalyser, 300);
+          return;
+        }
+        srcNode = audioCtx.createMediaStreamSource(stream);
+      } else {
+        srcNode = audioCtx.createMediaElementSource(video);
+        srcNode.connect(audioCtx.destination);
+      }
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.82;
+      srcNode.connect(analyser);
+      dataArray = new Uint8Array(analyser.frequencyBinCount);
+    } catch (e) {
+      analyser = null;
+    }
+  }
+
+  const BARS = 52, GAP = 3;
+  const BW = (VW - (BARS - 1) * GAP) / BARS;
+  const levels = new Float32Array(BARS);
+  const vel = new Float32Array(BARS);
+  const tgt = new Float32Array(BARS);
+  let phase = 0, synthStart = 0, synthetic = false;
+
+  function synthTarget(i, t) {
+    const base = 0.18 + 0.35 * Math.abs(Math.sin(t * 1.4 + i * 0.6));
+    const wob = 0.45 * Math.abs(Math.sin(t * 3.1 + Math.sin(i * 0.9 + t) * 2.2));
+    const spike = Math.pow(Math.max(0, Math.sin(t * 0.7 + i * 1.3) - 0.86) / 0.14, 2) * 0.5;
+    return Math.min(1, base + wob + spike);
+  }
+
+  function drawBar(x, y, w, h) {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, 4);
+    else ctx.rect(x, y, w, h);
+    ctx.fill();
+  }
+
+  function render() {
+    raf = requestAnimationFrame(render);
+    phase += 0.016;
+    const midY = VH / 2;
+    ctx.clearRect(0, 0, VW, VH);
+
+    let alive = 0;
+    if (analyser && dataArray) {
+      analyser.getByteFrequencyData(dataArray);
+      for (let i = 0; i < dataArray.length; i++) alive += dataArray[i];
+      if (alive > 2000) synthetic = false;
+      if (alive === 0) {
+        if (!synthStart) synthStart = performance.now();
+        else if (performance.now() - synthStart > 700) synthetic = true;
+      } else {
+        synthStart = 0;
+      }
+    } else {
+      synthStart = 0;
+      synthetic = true;
+    }
+
+    for (let i = 0; i < BARS; i++) {
+      if (analyser && dataArray && !synthetic) {
+        const idx = Math.floor(Math.pow(i / BARS, 1.6) * (dataArray.length * 0.75));
+        tgt[i] = dataArray[idx] / 255;
+      } else {
+        tgt[i] = synthTarget(i, phase);
+      }
+      vel[i] += (tgt[i] - levels[i]) * 0.22;
+      vel[i] *= 0.78;
+      levels[i] += vel[i];
+      const h = Math.max(2, levels[i] * (midY - 10));
+      const x = i * (BW + GAP);
+      const y = midY - h / 2;
+      const grad = ctx.createLinearGradient(0, midY - h, 0, midY + h);
+      grad.addColorStop(0, '#eafff2');
+      grad.addColorStop(0.45, '#33FF6E');
+      grad.addColorStop(1, '#0e7d3e');
+      ctx.fillStyle = grad;
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = 'rgba(51,255,110,0.65)';
+      drawBar(x, y, BW, h);
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.shadowBlur = 0;
+      ctx.fillRect(x, y, BW, 2);
+    }
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(51,255,110,0.12)';
+    ctx.fillRect(0, midY - 0.5, VW, 1);
+  }
+
+  function startVis() {
+    vis.classList.add('on');
+    if (!raf) render();
+  }
+  function stopVis() {
+    vis.classList.remove('on');
+    cancelAnimationFrame(raf);
+    raf = 0;
+  }
+
   function togglePlay() {
     if (!started) {
       started = true;
+      ensureCtx();
       video.muted = false;
       video.play()
-        .then(() => { setStatus('Live'); eq.classList.add('on'); sessionStorage.setItem('cnbcAutoReload', '0'); })
-        .catch(() => { started = false; setStatus('Tap again'); eq.classList.remove('on'); });
+        .then(() => { setStatus('Live'); startVis(); wireAnalyser(); sessionStorage.setItem('cnbcAutoReload', '0'); })
+        .catch(() => { started = false; setStatus('Tap again'); stopVis(); });
     } else {
       refresh();
     }
@@ -120,7 +243,15 @@
   status.addEventListener('click', togglePlay);
 
   function start() {
-    if (window.Hls && Hls.isSupported()) {
+    const native = !!(video.canPlayType && video.canPlayType('application/vnd.apple.mpegurl') !== '');
+    if (native) {
+      video.src = src;
+      video.addEventListener('loadedmetadata', () => {
+        setLive();
+        setStatus('Click to play');
+      });
+      video.addEventListener('error', () => setError(video.error && video.error.message));
+    } else if (window.Hls && Hls.isSupported()) {
       const hls = new Hls({ enableWorker: true });
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) { setError(data.type + ': ' + data.details + ' - reloading'); autoReload(); }
@@ -131,13 +262,6 @@
       });
       hls.loadSource(src);
       hls.attachMedia(video);
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = src;
-      video.addEventListener('loadedmetadata', () => {
-        setLive();
-        setStatus('Click to play');
-      });
-      video.addEventListener('error', () => setError(video.error && video.error.message));
     } else {
       setError('HLS is not supported in this browser');
     }
