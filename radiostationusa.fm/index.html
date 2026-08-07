@@ -34,7 +34,7 @@
   #err { margin-top: 18px; color: #f66; font-size: 12px; white-space: pre-wrap; min-height: 16px; }
   #vis {
     position: absolute; left: 0; right: 0; bottom: 0;
-    width: 100%; height: 110px; z-index: 0; pointer-events: none;
+    width: 100%; height: 330px; z-index: 0; pointer-events: none;
     opacity: 0; transition: opacity .5s;
   }
   #vis.on { opacity: 1; }
@@ -72,7 +72,7 @@
   let tgt = new Float32Array(N);
   function rebuildBars() {
     N = Math.min(140, Math.max(36, Math.round(VW / 24)));
-    GAP = VW > 1000 ? 4 : 3;
+    GAP = VW > 1600 ? 8 : VW > 1000 ? 6 : 4;
     BW = (VW - (N - 1) * GAP) / N;
     levels = new Float32Array(N);
     vel = new Float32Array(N);
@@ -223,23 +223,23 @@
       vel[i] += (tgt[i] - levels[i]) * 0.22;
       vel[i] *= 0.78;
       levels[i] += vel[i];
-      const h = Math.max(2, levels[i] * (midY - 8));
+      const h = Math.max(2, levels[i] * (midY - 10));
       const x = i * (BW + GAP);
       const y = midY - h / 2;
       const grad = ctx.createLinearGradient(0, midY - h, 0, midY + h);
-      grad.addColorStop(0, '#eafff2');
-      grad.addColorStop(0.45, '#33FF6E');
-      grad.addColorStop(1, '#0e7d3e');
+      grad.addColorStop(0, '#a8d8bd');
+      grad.addColorStop(0.5, '#3faf6b');
+      grad.addColorStop(1, '#1d6b42');
       ctx.fillStyle = grad;
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = 'rgba(51,255,110,0.6)';
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = 'rgba(63,175,107,0.35)';
       drawBar(x, y, BW, h);
-      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.fillStyle = 'rgba(216,255,230,0.5)';
       ctx.shadowBlur = 0;
       ctx.fillRect(x, y, BW, 2);
     }
     ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(51,255,110,0.12)';
+    ctx.fillStyle = 'rgba(63,175,107,0.06)';
     ctx.fillRect(0, midY - 0.5, VW, 1);
   }
 
