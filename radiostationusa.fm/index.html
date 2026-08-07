@@ -59,12 +59,38 @@
   function setLive() { dot.classList.add('live'); }
   function setStatus(t) { status.textContent = t; }
 
+  function autoReload() {
+    let n = parseInt(sessionStorage.getItem('cnbcAutoReload') || '0', 10);
+    if (n >= 3) {
+      sessionStorage.removeItem('cnbcAutoReload');
+      setStatus('Stuck - click "CNBC Audio" to reload');
+      return;
+    }
+    n++;
+    sessionStorage.setItem('cnbcAutoReload', String(n));
+    setStatus('Stuck - reloading\u2026');
+    setTimeout(refresh, 600);
+  }
+
+  let lastTime = -1;
+  let stuck = 0;
+  setInterval(() => {
+    if (!started || video.paused || video.ended) { stuck = 0; lastTime = video.currentTime; return; }
+    if (video.currentTime === lastTime) {
+      stuck++;
+      if (stuck >= 5) { stuck = 0; autoReload(); }
+    } else {
+      stuck = 0;
+      lastTime = video.currentTime;
+    }
+  }, 2000);
+
   title.addEventListener('click', () => {
     if (!started) {
       started = true;
       video.muted = false;
       video.play()
-        .then(() => setStatus('Live'))
+        .then(() => { setStatus('Live'); sessionStorage.setItem('cnbcAutoReload', '0'); })
         .catch(() => { started = false; setStatus('Tap again'); });
     } else {
       refresh();
@@ -75,7 +101,7 @@
     if (window.Hls && Hls.isSupported()) {
       const hls = new Hls({ enableWorker: true });
       hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) setError(data.type + ': ' + data.details);
+        if (data.fatal) { setError(data.type + ': ' + data.details + ' - reloading'); autoReload(); }
       });
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setLive();
