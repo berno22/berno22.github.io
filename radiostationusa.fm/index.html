@@ -61,7 +61,7 @@
 
   function autoReload() {
     let n = parseInt(sessionStorage.getItem('cnbcAutoReload') || '0', 10);
-    if (n >= 3) {
+    if (n >= 100) {
       sessionStorage.removeItem('cnbcAutoReload');
       setStatus('Stuck - click "CNBC Audio" to reload');
       return;
@@ -78,12 +78,12 @@
     if (!started || video.paused || video.ended) { stuck = 0; lastTime = video.currentTime; return; }
     if (video.currentTime === lastTime) {
       stuck++;
-      if (stuck >= 5) { stuck = 0; autoReload(); }
+      if (stuck >= 2) { stuck = 0; autoReload(); }
     } else {
       stuck = 0;
       lastTime = video.currentTime;
     }
-  }, 2000);
+  }, 500);
 
   title.addEventListener('click', () => {
     if (!started) {
