@@ -32,6 +32,23 @@
   #status:hover { color: #33FF6E; }
   video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   #err { margin-top: 18px; color: #f66; font-size: 12px; white-space: pre-wrap; min-height: 16px; }
+  #eq { display: none; align-items: flex-end; justify-content: center; gap: 5px;
+        height: 30px; margin: 20px auto 0; }
+  #eq.on { display: flex; }
+  #eq span {
+    width: 5px; height: 100%; border-radius: 3px; background: #33FF6E;
+    transform-origin: bottom; animation: eq .9s ease-in-out infinite;
+    box-shadow: 0 0 8px rgba(51,255,110,.6);
+  }
+  #eq span:nth-child(1) { animation-duration: .8s; }
+  #eq span:nth-child(2) { animation-duration: 1.1s; animation-delay: .2s; }
+  #eq span:nth-child(3) { animation-duration: .7s; animation-delay: .1s; }
+  #eq span:nth-child(4) { animation-duration: 1s; animation-delay: .3s; }
+  #eq span:nth-child(5) { animation-duration: .85s; animation-delay: .05s; }
+  @keyframes eq {
+    0%, 100% { transform: scaleY(.35); }
+    50% { transform: scaleY(1); }
+  }
 </style>
 </head>
 <body>
@@ -40,6 +57,7 @@
     <div id="dot"></div>
     <h1 id="title">CNBC Audio</h1>
     <p id="status">Loading&hellip;</p>
+    <div id="eq" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
     <div id="err"></div>
   </div>
   <video id="video" controls muted playsinline preload="auto"></video>
@@ -50,6 +68,7 @@
   const title = document.getElementById('title');
   const status = document.getElementById('status');
   const errBox = document.getElementById('err');
+  const eq = document.getElementById('eq');
   const src = 'https://vofile.ru/usa/CNBC/playlist.m3u8';
   let started = false;
 
@@ -91,8 +110,8 @@
       started = true;
       video.muted = false;
       video.play()
-        .then(() => { setStatus('Live'); sessionStorage.setItem('cnbcAutoReload', '0'); })
-        .catch(() => { started = false; setStatus('Tap again'); });
+        .then(() => { setStatus('Live'); eq.classList.add('on'); sessionStorage.setItem('cnbcAutoReload', '0'); })
+        .catch(() => { started = false; setStatus('Tap again'); eq.classList.remove('on'); });
     } else {
       refresh();
     }
