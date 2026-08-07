@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="unsafe-url">
-<title>CNBC Radio</title>
+<title>CNBC Audio</title>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 <style>
   body { margin: 0; background: #0a0a0c; color: #e8e8ec;
@@ -27,83 +27,57 @@
   #status { margin: 0; color: #9a9aa2; font-size: 14px; min-height: 20px; }
   video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   #err { margin-top: 18px; color: #f66; font-size: 12px; white-space: pre-wrap; min-height: 16px; }
-  #pill {
-    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
-    padding: 12px 22px; border-radius: 999px; cursor: pointer; z-index: 30;
-    background: #16181d; border: 1px solid #2a2d34; color: #33FF6E;
-    font-size: 14px; font-weight: 600; user-select: none;
-    opacity: 0; pointer-events: none; transition: opacity .25s;
-  }
-  #pill.show { opacity: 1; pointer-events: auto; }
-  #refresh {
-    margin-top: 24px; padding: 10px 28px; border-radius: 999px; cursor: pointer;
-    background: transparent; border: 1px solid #2a2d34; color: #9a9aa2;
-    font-size: 14px; font-weight: 600; font-family: inherit;
+  #btn {
+    margin: 26px auto 0; width: 72px; height: 72px; border-radius: 50%;
+    border: 2px solid #33FF6E; background: rgba(51,255,110,.08); color: #33FF6E;
+    cursor: pointer; display: none; align-items: center; justify-content: center;
     transition: all .25s;
   }
-  #refresh:hover { border-color: #33FF6E; color: #33FF6E; }
+  #btn.show { display: inline-flex; }
+  #btn:hover { background: rgba(51,255,110,.18); box-shadow: 0 0 24px rgba(51,255,110,.35); }
+  #btn svg { width: 28px; height: 28px; fill: #33FF6E; }
 </style>
 </head>
 <body>
 <div id="wrap">
   <div id="card">
     <div id="dot"></div>
-    <h1>CNBC Radio</h1>
-    <p id="status">Starting&hellip;</p>
+    <h1>CNBC Audio</h1>
+    <p id="status">Loading&hellip;</p>
     <div id="err"></div>
-    <button id="refresh" type="button">Refresh</button>
+    <button id="btn" type="button" title="Play">
+      <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+    </button>
   </div>
   <video id="video" controls muted playsinline preload="auto"></video>
-  <div id="pill">Tap to enable sound</div>
 </div>
 <script>
   const video = document.getElementById('video');
   const dot = document.getElementById('dot');
   const status = document.getElementById('status');
   const errBox = document.getElementById('err');
-  const pill = document.getElementById('pill');
+  const btn = document.getElementById('btn');
   const src = 'https://vofile.ru/usa/CNBC/playlist.m3u8';
-  const refreshBtn = document.getElementById('refresh');
 
   function refresh() { location.reload(); }
-  refreshBtn.addEventListener('click', refresh);
   dot.addEventListener('click', refresh);
 
   function setError(msg) { errBox.textContent = 'Error: ' + msg; }
-  function showPill() { pill.classList.add('show'); }
-  function hidePill() { pill.classList.remove('show'); }
   function setLive() { dot.classList.add('live'); status.textContent = 'Live'; }
   function setStatus(t) { status.textContent = t; }
 
-  function tryUnmute() {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.mode === 'refresh') { refresh(); return; }
     video.muted = false;
-    setTimeout(() => {
-      if (video.paused) {
-        video.play()
-          .then(() => { setStatus('Live'); })
-          .catch(() => {
-            video.muted = true;
-            video.play().catch(() => {});
-            showPill();
-            setStatus('Muted');
-          });
-      } else {
-        setStatus('Live');
-      }
-    }, 60);
-  }
-
-  function tryAutoplay() {
     video.play()
-      .then(() => setStatus('Live'))
-      .catch(() => {
-        video.muted = true;
-        video.play().then(() => {
-          setStatus('Starting\u2026');
-          setTimeout(tryUnmute, 1000);
-        }).catch(() => showPill());
-      });
-  }
+      .then(() => {
+        btn.dataset.mode = 'refresh';
+        btn.title = 'Refresh';
+        btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.76-4.24L13 11h7V4z"/></svg>';
+        setStatus('Live');
+      })
+      .catch(() => setStatus('Tap to enable sound'));
+  });
 
   function start() {
     if (window.Hls && Hls.isSupported()) {
@@ -111,28 +85,27 @@
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) setError(data.type + ': ' + data.details);
       });
-      hls.on(Hls.Events.MANIFEST_PARSED, tryAutoplay);
-      hls.on(Hls.Events.MANIFEST_PARSED, setLive);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setLive();
+        btn.classList.add('show');
+        video.muted = true;
+        video.play().catch(() => {});
+      });
       hls.loadSource(src);
       hls.attachMedia(video);
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = src;
-      video.addEventListener('loadedmetadata', tryAutoplay);
-      video.addEventListener('loadedmetadata', setLive);
+      video.addEventListener('loadedmetadata', () => {
+        setLive();
+        btn.classList.add('show');
+        video.muted = true;
+        video.play().catch(() => {});
+      });
       video.addEventListener('error', () => setError(video.error && video.error.message));
     } else {
       setError('HLS is not supported in this browser');
     }
   }
-
-  function unlock() {
-    video.muted = false;
-    video.play().catch(() => {});
-  }
-  ['pointerdown', 'keydown'].forEach(ev =>
-    document.addEventListener(ev, unlock, { once: true, passive: true }));
-
-  pill.addEventListener('click', () => { video.muted = false; video.play().catch(() => {}); hidePill(); });
 
   if (document.readyState === 'complete' || document.readyState === 'interactive') {
     start();
