@@ -105,35 +105,38 @@
     }
   }, 500);
 
-  let raf = 0, scroll = 0;
+  let raf = 0;
   const PERIOD = 96;
 
   function ecg(u) {
     if (u < 0.04)  return (0.18 / 0.04) * u;
     if (u < 0.09)  return 0.18 * (1 - (u - 0.04) / 0.05);
-    if (u < 0.30)  return 0;
-    if (u < 0.315) return -0.25 * (u - 0.30) / 0.015;
-    if (u < 0.33)  return -0.25 + 1.25 * (u - 0.315) / 0.015;
-    if (u < 0.345) return 1.0 - 1.35 * (u - 0.33) / 0.015;
+    if (u < 0.29)  return 0;
+    if (u < 0.305) return -0.25 * (u - 0.29) / 0.015;
+    if (u < 0.325) return -0.25 + 1.25 * (u - 0.305) / 0.020;
+    if (u < 0.345) return 1.0 - 1.35 * (u - 0.325) / 0.020;
     if (u < 0.42)  return -0.35 * (1 - (u - 0.345) / 0.075);
     if (u < 0.60)  return 0;
     if (u < 0.70)  return 0.35 * Math.sin(Math.PI * (u - 0.60) / 0.10);
     return 0;
   }
 
-  function render() {
+  function render(ts) {
     raf = requestAnimationFrame(render);
-    scroll += 2.2;
+    const t = ts / 1000;
     const midY = VH / 2;
+    const amp = 36 * (1 + 0.05 * Math.sin(t * 0.6));
+    const period = PERIOD * (1 + 0.04 * Math.sin(t * 0.33));
+    const scroll = t * 110;
     ctx.clearRect(0, 0, VW, VH);
     ctx.strokeStyle = '#33FF6E';
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 2.2;
     ctx.shadowBlur = 10;
     ctx.shadowColor = 'rgba(51,255,110,0.8)';
     ctx.beginPath();
     for (let x = 0; x <= VW; x += 1) {
-      const u = ((x + scroll) / PERIOD) % 1;
-      const y = midY - ecg(u) * 36;
+      const u = ((x + scroll) / period) % 1;
+      const y = midY - ecg(u) * amp;
       x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     }
     ctx.stroke();
