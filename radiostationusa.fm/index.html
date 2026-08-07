@@ -67,16 +67,18 @@
   function setStatus(t) { status.textContent = t; }
 
   btn.addEventListener('click', () => {
-    if (btn.dataset.mode === 'refresh') { refresh(); return; }
-    video.muted = false;
-    video.play()
-      .then(() => {
-        btn.dataset.mode = 'refresh';
-        btn.title = 'Refresh';
-        btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.76-4.24L13 11h7V4z"/></svg>';
-        setStatus('Live');
-      })
-      .catch(() => setStatus('Tap to enable sound'));
+    if (video.paused || video.muted) {
+      video.muted = false;
+      video.play()
+        .then(() => {
+          btn.title = 'Refresh';
+          btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.76-4.24L13 11h7V4z"/></svg>';
+          setStatus('Live');
+        })
+        .catch(() => setStatus('Tap to enable sound'));
+    } else {
+      refresh();
+    }
   });
 
   function start() {
