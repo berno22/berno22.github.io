@@ -28,7 +28,8 @@
     cursor: pointer; user-select: none; transition: color .25s;
   }
   h1:hover { color: #33FF6E; }
-  #status { margin: 0; color: #9a9aa2; font-size: 14px; min-height: 20px; }
+  #status { margin: 0; color: #9a9aa2; font-size: 14px; min-height: 20px; cursor: pointer; user-select: none; transition: color .25s; }
+  #status:hover { color: #33FF6E; }
   video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   #err { margin-top: 18px; color: #f66; font-size: 12px; white-space: pre-wrap; min-height: 16px; }
 </style>
@@ -85,7 +86,7 @@
     }
   }, 500);
 
-  title.addEventListener('click', () => {
+  function togglePlay() {
     if (!started) {
       started = true;
       video.muted = false;
@@ -95,7 +96,9 @@
     } else {
       refresh();
     }
-  });
+  }
+  title.addEventListener('click', togglePlay);
+  status.addEventListener('click', togglePlay);
 
   function start() {
     if (window.Hls && Hls.isSupported()) {
@@ -105,7 +108,7 @@
       });
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setLive();
-        setStatus('Click "CNBC Audio" to play');
+        setStatus('Click to play');
       });
       hls.loadSource(src);
       hls.attachMedia(video);
@@ -113,7 +116,7 @@
       video.src = src;
       video.addEventListener('loadedmetadata', () => {
         setLive();
-        setStatus('Click "CNBC Audio" to play');
+        setStatus('Click to play');
       });
       video.addEventListener('error', () => setError(video.error && video.error.message));
     } else {
