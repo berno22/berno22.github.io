@@ -11,16 +11,17 @@ self.addEventListener('fetch', function(e) {
 
   e.respondWith(
     fetch(e.request.url, { mode: 'cors', credentials: 'omit' }).then(function(res) {
-      if (!res || res.status === 0) return res;
-      var orig = (res.headers.get('content-type') || '').toLowerCase();
-      var ct = orig.indexOf('mpegurl') !== -1 ? 'application/vnd.apple.mpegurl' : 'video/mp4';
-      var h = new Headers();
-      res.headers.forEach(function(v, k) {
-        if (k.toLowerCase() !== 'content-type' && k.toLowerCase() !== 'content-length') h.append(k, v);
+      if (!res || res.status === 0 || !res.ok) return res;
+      return res.arrayBuffer().then(function(buf) {
+        var isPlaylist = buf.byteLength > 0 && new Uint8Array(buf, 0, 1)[0] === 0x23;
+        var h = new Headers();
+        res.headers.forEach(function(v, k) {
+          if (k.toLowerCase() !== 'content-type' && k.toLowerCase() !== 'content-length') h.append(k, v);
+        });
+        h.set('Content-Type', isPlaylist ? 'application/vnd.apple.mpegurl' : 'video/mp4');
+        h.set('Access-Control-Allow-Origin', '*');
+        return new Response(new Uint8Array(buf), { status: res.status, statusText: res.statusText, headers: h });
       });
-      h.set('Content-Type', ct);
-      h.set('Access-Control-Allow-Origin', '*');
-      return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
     }).catch(function() {
       return fetch(e.request.url, { mode: 'no-cors', credentials: 'omit' });
     })
