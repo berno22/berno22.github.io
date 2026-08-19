@@ -12,26 +12,27 @@
   #wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
           background: radial-gradient(1200px 600px at 50% -10%, #1a1f24, #0a0a0c 60%); }
   #card { position: relative; z-index: 1; text-align: center; padding: 32px; zoom: 1.69; }
-  #dot {
-    width: 16px; height: 16px; border-radius: 50%; margin: 0 auto 18px;
-    background: #555; box-shadow: 0 0 0 rgba(51,255,110,0); transition: all .3s;
-    cursor: pointer; user-select: none; position: relative; z-index: 2;
-  }
-  #dot.live { background: #33FF6E; box-shadow: 0 0 18px rgba(51,255,110,.8); animation: pulse 2s infinite; }
-  @keyframes pulse {
-    0% { box-shadow: 0 0 0 0 rgba(51,255,110,.55); }
-    70% { box-shadow: 0 0 0 14px rgba(51,255,110,0); }
-    100% { box-shadow: 0 0 0 0 rgba(51,255,110,0); }
-  }
   h1 {
-    margin: 0 0 6px; font-size: 28px; font-weight: 700; letter-spacing: .5px;
+    margin: 12px 0; font-size: 28px; font-weight: 700; letter-spacing: .5px;
     cursor: pointer; user-select: none; transition: color .25s; position: relative; z-index: 2;
   }
-  h1:hover { color: #33FF6E; }
+  h1:hover { color: #2E9BFF; }
   #status { margin: 0; color: #9a9aa2; font-size: 14px; min-height: 20px; cursor: pointer; user-select: none; transition: color .25s; position: relative; z-index: 2; }
-  #status:hover { color: #33FF6E; }
+  #status:hover { color: #2E9BFF; }
   video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   #err { margin-top: 18px; color: #f66; font-size: 12px; white-space: pre-wrap; min-height: 16px; }
+  #np { margin-top: 12px; display: none; text-align: center; }
+  #np.on { display: block; animation: fadein .5s ease; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  #art {
+    display: block; margin: 0 auto; width: 96px; height: 96px; border-radius: 16px; object-fit: cover;
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.45);
+    cursor: pointer; user-select: none;
+    transition: border-color .25s;
+  }
+  #art:hover { border-color: #2E9BFF; }
+  #cut { margin: 0 0 12px; color: #9a9aa2; font-size: 14px; max-width: 260px; }
   #vis {
     position: absolute; left: 0; right: 0; bottom: 0;
     width: 100%; height: 330px; z-index: 0; pointer-events: none;
@@ -43,8 +44,11 @@
 <body>
 <div id="wrap">
   <div id="card">
-    <div id="dot"></div>
+    <div id="np">
+      <img id="art" alt="">
+    </div>
     <h1 id="title">CNBC Audio</h1>
+    <div id="cut"></div>
     <p id="status">Loading&hellip;</p>
     <div id="err"></div>
   </div>
@@ -53,9 +57,9 @@
 </div>
 <script>
   const video = document.getElementById('video');
-  const dot = document.getElementById('dot');
   const title = document.getElementById('title');
   const status = document.getElementById('status');
+  const artEl = document.getElementById('art');
   const errBox = document.getElementById('err');
   const vis = document.getElementById('vis');
   const ctx = vis.getContext('2d');
@@ -105,10 +109,9 @@
   window.addEventListener('resize', sizeCanvas);
 
   function refresh() { location.reload(); }
-  dot.addEventListener('click', refresh);
 
   function setError(msg) { errBox.textContent = 'Error: ' + msg; }
-  function setLive() { dot.classList.add('live'); }
+  function setLive() {}
   function setStatus(t) { status.textContent = t; }
 
   function autoReload() {
@@ -228,20 +231,20 @@
       const x = i * (BW + GAP);
       const y = midY - h / 2;
       const grad = ctx.createLinearGradient(0, midY - h, 0, midY + h);
-      grad.addColorStop(0, '#16281e');
-      grad.addColorStop(0.5, '#0e1c13');
-      grad.addColorStop(1, '#07100b');
+      grad.addColorStop(0, '#1d3a5c');
+      grad.addColorStop(0.5, '#12293f');
+      grad.addColorStop(1, '#0a1726');
       ctx.fillStyle = grad;
       ctx.shadowBlur = 6;
-      ctx.shadowColor = 'rgba(35,74,51,0.25)';
+      ctx.shadowColor = 'rgba(41,90,140,0.25)';
       drawBar(x, y, BW, h);
-      ctx.fillStyle = 'rgba(150,200,170,0.25)';
+      ctx.fillStyle = 'rgba(150,190,230,0.25)';
       ctx.shadowBlur = 0;
       ctx.fillRect(x, y, BW, 2);
     }
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(35,74,51,0.08)';
+    ctx.fillStyle = 'rgba(41,90,140,0.08)';
     ctx.fillRect(0, midY - 0.5, VW, 1);
   }
 
@@ -269,6 +272,7 @@
   }
   title.addEventListener('click', togglePlay);
   status.addEventListener('click', togglePlay);
+  artEl.addEventListener('click', togglePlay);
 
   function start() {
     const native = !!(video.canPlayType && video.canPlayType('application/vnd.apple.mpegurl') !== '');
@@ -300,6 +304,64 @@
   } else {
     window.addEventListener('DOMContentLoaded', start);
   }
+
+  const CNBC_GUID = '2b6effb8-eb0e-7421-d7bb-d843a9ff3ce1';
+  const EPG_URL = 'https://lookaround-cache-prod.streaming.siriusxm.com/playbackservices/v1/live/lookAround';
+  const ART_BASE = 'https://imgsrv-sxm-prod-device.streaming.siriusxm.com/';
+  const LOGO_KEY = 'if/68/68a5fed8ea323a848dd0014bb8c9ddb3_1782186558.png';
+  const np = document.getElementById('np');
+  const cutEl = document.getElementById('cut');
+
+  function artUrl(artKey, size) {
+    const payload = JSON.stringify({ key: artKey, edits: [{ resize: { width: size, height: size } }] });
+    return ART_BASE + btoa(payload);
+  }
+
+function renderEpg(cut, show) {
+    let showName = '';
+    const cur = cut && !cut.ad ? cut : null;
+    if (cur && cur.a) showName = cur.a;
+    if (!showName && show && show.n) showName = show.n;
+    const key = (show && show.k && show.n === showName) ? show.k : LOGO_KEY;
+    artEl.src = artUrl(key, 320);
+    if (showName) {
+      title.textContent = showName;
+      document.title = showName + ' \u00b7 CNBC Audio';
+    }
+    if (cut && cut.ad) {
+      cutEl.textContent = 'Advertisement';
+      cutEl.classList.add('ad');
+    } else if (cut) {
+      cutEl.classList.remove('ad');
+      cutEl.textContent = (cut.a && cut.a !== showName ? cut.a + ' \u00b7 ' : '') + (cut.n || '');
+    }
+    np.classList.add('on');
+  }
+
+  function pollEpg() {
+    const js = "fetch('" + EPG_URL + "',{mode:'cors'}).then(r=>r.json()).then(d=>{"
+      + "var ch=d.channels['" + CNBC_GUID + "'];"
+      + "var cuts=(ch&&ch.cuts)||[],shows=(ch&&ch.shows)||[];"
+      + "var cut=cuts[cuts.length-1]||null,show=shows[shows.length-1]||null;"
+      + "parent.postMessage({m:'epg',ok:true,cut:cut?{n:cut.name,a:cut.artistName,ad:!!cut.isAd}:null,show:show?{n:show.name,k:show.image.url}:null},'*');"
+      + "}).catch(e=>parent.postMessage({m:'epg',ok:false,e:String(e)},'*'));";
+    const f = document.createElement('iframe');
+    f.sandbox = 'allow-scripts';
+    f.style.display = 'none';
+    f.srcdoc = '<scr' + 'ipt>' + js + '</scr' + 'ipt>';
+    document.body.appendChild(f);
+    setTimeout(() => f.remove(), 30000);
+  }
+
+  window.addEventListener('message', (ev) => {
+    const d = ev.data;
+    if (!d || d.m !== 'epg') return;
+    if (d.ok) renderEpg(d.cut, d.show);
+    else artEl.src = artUrl(LOGO_KEY, 160);
+  });
+
+  pollEpg();
+  setInterval(pollEpg, 60000);
 </script>
 </body>
 </html>
