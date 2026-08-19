@@ -367,6 +367,8 @@ function updateMediaSession(title_, artist_, album_, artKey, size) {
     np.classList.add('on');
   }
 
+  artEl.onerror = () => artEl.src = artUrl(LOGO_KEY, 320);
+
   function pollEpg() {
     const js = "fetch('" + EPG_URL + "',{mode:'cors'}).then(r=>r.json()).then(d=>{"
       + "var ch=d.channels['" + CNBC_GUID + "'];"
@@ -392,6 +394,8 @@ function updateMediaSession(title_, artist_, album_, artKey, size) {
     }
   });
 
+  artEl.src = artUrl(LOGO_KEY, 320);
+  np.classList.add('on');
   pollEpg();
   setInterval(pollEpg, 60000);
 </script>
