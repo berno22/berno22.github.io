@@ -353,10 +353,12 @@ function updateMediaSession(title_, artist_, album_, artKey, size) {
       title.textContent = showName;
       document.title = showName + ' \u00b7 CNBC Audio';
     }
-    if (cut && cut.ad) {
+    const isBreak = cut && (cut.ad || /station break|advertisement/i.test(cut.n || ''));
+    if (isBreak) {
       cutEl.textContent = 'Advertisement';
       cutEl.classList.add('ad');
-      updateMediaSession('Station break');
+      artEl.src = artUrl(LOGO_KEY, 320);
+      updateMediaSession('Station break', '', '', LOGO_KEY, 640);
     } else if (cut) {
       cutEl.classList.remove('ad');
       cutEl.textContent = (cut.a && !similar(cut.a, showName) ? cut.a + ' \u00b7 ' : '') + (cut.n || '');
