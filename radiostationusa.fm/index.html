@@ -32,7 +32,7 @@
     transition: border-color .25s;
   }
   #art:hover { border-color: #2E9BFF; }
-  #cut { margin: 0 0 12px; color: #9a9aa2; font-size: 14px; max-width: 260px; }
+  #cut { margin: 0 auto 12px; color: #9a9aa2; font-size: 14px; max-width: 260px; }
   #vis {
     position: absolute; left: 0; right: 0; bottom: 0;
     width: 100%; height: 330px; z-index: 0; pointer-events: none;
@@ -273,6 +273,13 @@
   title.addEventListener('click', togglePlay);
   status.addEventListener('click', togglePlay);
   artEl.addEventListener('click', togglePlay);
+  if (navigator.mediaSession) {
+    try {
+      navigator.mediaSession.setActionHandler('play', () => { if (video.paused) togglePlay(); });
+      navigator.mediaSession.setActionHandler('pause', () => { if (!video.paused) togglePlay(); });
+    } catch (e) {}
+  }
+  updateMediaSession('CNBC Audio');
 
   function start() {
     const native = !!(video.canPlayType && video.canPlayType('application/vnd.apple.mpegurl') !== '');
@@ -317,12 +324,30 @@
     return ART_BASE + btoa(payload);
   }
 
-function renderEpg(cut, show) {
-    let showName = '';
+function updateMediaSession(title_, artist_, album_, artKey, size) {
+    if (!(navigator.mediaSession && window.MediaMetadata)) return;
+    const meta = { title: title_ };
+    if (artist_) meta.artist = artist_;
+    if (album_) meta.album = album_;
+    if (artKey) meta.artwork = [{ src: artUrl(artKey, size), sizes: size + 'x' + size }];
+    navigator.mediaSession.metadata = new MediaMetadata(meta);
+  }
+
+  function similar(a, b) {
+    a = (a || '').toLowerCase(); b = (b || '').toLowerCase();
+    if (a === b) return true;
+    const wa = a.split(/\s+/), wb = b.split(/\s+/);
+    const min = Math.min(wa.length, wb.length);
+    let same = 0;
+    while (same < min && wa[same] === wb[same]) same++;
+    return same >= Math.min(2, min);
+  }
+
+  function renderEpg(cut, show) {
+    let showName = (show && show.n) ? show.n : '';
     const cur = cut && !cut.ad ? cut : null;
-    if (cur && cur.a) showName = cur.a;
-    if (!showName && show && show.n) showName = show.n;
-    const key = (show && show.k && show.n === showName) ? show.k : LOGO_KEY;
+    if (!showName && cur && cur.a) showName = cur.a;
+    const key = (show && show.k && similar(showName, show.n)) ? show.k : LOGO_KEY;
     artEl.src = artUrl(key, 320);
     if (showName) {
       title.textContent = showName;
@@ -331,9 +356,11 @@ function renderEpg(cut, show) {
     if (cut && cut.ad) {
       cutEl.textContent = 'Advertisement';
       cutEl.classList.add('ad');
+      updateMediaSession('Station break');
     } else if (cut) {
       cutEl.classList.remove('ad');
-      cutEl.textContent = (cut.a && cut.a !== showName ? cut.a + ' \u00b7 ' : '') + (cut.n || '');
+      cutEl.textContent = (cut.a && !similar(cut.a, showName) ? cut.a + ' \u00b7 ' : '') + (cut.n || '');
+      updateMediaSession(cut.n || showName, cut.a || showName, showName, key, 640);
     }
     np.classList.add('on');
   }
@@ -357,7 +384,10 @@ function renderEpg(cut, show) {
     const d = ev.data;
     if (!d || d.m !== 'epg') return;
     if (d.ok) renderEpg(d.cut, d.show);
-    else artEl.src = artUrl(LOGO_KEY, 160);
+    else {
+      artEl.src = artUrl(LOGO_KEY, 160);
+      updateMediaSession('CNBC Audio', '', '', LOGO_KEY, 640);
+    }
   });
 
   pollEpg();
