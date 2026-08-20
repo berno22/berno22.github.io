@@ -7,32 +7,34 @@
 <title>CNBC Audio</title>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 <style>
-  body { margin: 0; background: #0a0a0c; color: #e8e8ec;
+  body { margin: 0; background: #f6f6f4; color: #111;
          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
   #wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-          background: radial-gradient(1200px 600px at 50% -10%, #1a1f24, #0a0a0c 60%); }
-  #card { position: relative; z-index: 1; text-align: center; padding: 32px; zoom: 1.69; }
+          background: #f6f6f4; }
+  #card { position: relative; z-index: 1; text-align: center; padding: 32px; zoom: 1.69;
+          background: #fff; border: 1px solid rgba(0,0,0,0.08); border-radius: 20px;
+          box-shadow: 0 8px 40px rgba(0,0,0,0.06); }
   h1 {
-    margin: 12px 0; font-size: 28px; font-weight: 700; letter-spacing: .5px;
+    margin: 12px 0; font-size: 28px; font-weight: 600; letter-spacing: -0.2px;
     cursor: pointer; user-select: none; transition: color .25s; position: relative; z-index: 2;
   }
   h1:hover { color: #2E9BFF; }
-  #status { margin: 0; color: #9a9aa2; font-size: 14px; min-height: 20px; cursor: pointer; user-select: none; transition: color .25s; position: relative; z-index: 2; }
+  #status { margin: 0; color: #5c5e62; font-size: 14px; min-height: 20px; cursor: pointer; user-select: none; transition: color .25s; position: relative; z-index: 2; }
   #status:hover { color: #2E9BFF; }
   video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-  #err { margin-top: 18px; color: #f66; font-size: 12px; white-space: pre-wrap; min-height: 16px; }
+  #err { margin-top: 18px; color: #e82127; font-size: 12px; white-space: pre-wrap; min-height: 16px; }
   #np { margin-top: 12px; display: none; text-align: center; }
   #np.on { display: block; animation: fadein .5s ease; }
   @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
   #art {
     display: block; margin: 0 auto; width: 96px; height: 96px; border-radius: 16px; object-fit: cover;
-    border: 1px solid rgba(255,255,255,0.08);
-    box-shadow: 0 4px 16px rgba(0,0,0,0.45);
+    border: 1px solid rgba(0,0,0,0.08);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.08);
     cursor: pointer; user-select: none;
     transition: border-color .25s;
   }
   #art:hover { border-color: #2E9BFF; }
-  #cut { margin: 0 auto 12px; color: #9a9aa2; font-size: 14px; max-width: 260px; }
+  #cut { margin: 0 auto 12px; color: #5c5e62; font-size: 14px; max-width: 260px; }
   #vis {
     position: absolute; left: 0; right: 0; bottom: 0;
     width: 100%; height: 330px; z-index: 0; pointer-events: none;
@@ -67,7 +69,7 @@
   let PERIOD = 96, baseAmp = 40;
   let midY = 75, hist = null, pen = 0, period = PERIOD, amp = baseAmp;
   let raf = 0;
-  const src = 'https://vofile.ru/usa/CNBC/playlist.m3u8';
+  const src = 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
   let started = false;
 
   let N = 52, BW = 6, GAP = 3;
@@ -231,20 +233,20 @@
       const x = i * (BW + GAP);
       const y = midY - h / 2;
       const grad = ctx.createLinearGradient(0, midY - h, 0, midY + h);
-      grad.addColorStop(0, '#1d3a5c');
-      grad.addColorStop(0.5, '#12293f');
-      grad.addColorStop(1, '#0a1726');
+      grad.addColorStop(0, '#d8d8d8');
+      grad.addColorStop(0.5, '#c6c6c6');
+      grad.addColorStop(1, '#b3b3b3');
       ctx.fillStyle = grad;
       ctx.shadowBlur = 6;
-      ctx.shadowColor = 'rgba(41,90,140,0.25)';
+      ctx.shadowColor = 'rgba(0,0,0,0.12)';
       drawBar(x, y, BW, h);
-      ctx.fillStyle = 'rgba(150,190,230,0.25)';
+      ctx.fillStyle = 'rgba(90,90,90,0.25)';
       ctx.shadowBlur = 0;
       ctx.fillRect(x, y, BW, 2);
     }
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(41,90,140,0.08)';
+    ctx.fillStyle = 'rgba(0,0,0,0.06)';
     ctx.fillRect(0, midY - 0.5, VW, 1);
   }
 
