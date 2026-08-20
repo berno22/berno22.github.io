@@ -15,25 +15,26 @@
           background: #fff; border: 1px solid rgba(0,0,0,0.08); border-radius: 20px;
           box-shadow: 0 8px 40px rgba(0,0,0,0.06); }
   h1 {
-    margin: 12px 0; font-size: 28px; font-weight: 600; letter-spacing: -0.2px;
+    margin: 12px 0; font-size: 28px; font-weight: 600; letter-spacing: -0.2px; color: #62666a;
     cursor: pointer; user-select: none; transition: color .25s; position: relative; z-index: 2;
   }
-  h1:hover { color: #2E9BFF; }
+  h1:hover { color: #2f3236; }
   #status { margin: 0; color: #5c5e62; font-size: 14px; min-height: 20px; cursor: pointer; user-select: none; transition: color .25s; position: relative; z-index: 2; }
-  #status:hover { color: #2E9BFF; }
+  #status:hover { color: #2f3236; }
   video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-  #err { margin-top: 18px; color: #e82127; font-size: 12px; white-space: pre-wrap; min-height: 16px; }
-  #np { margin-top: 12px; display: none; text-align: center; }
+  #err { margin-top: 18px; color: #e82127; font-size: 12px; white-space: pre-wrap; }
+  #err:empty { margin-top: 0; }
+  #np { display: none; text-align: center; }
   #np.on { display: block; animation: fadein .5s ease; }
   @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
   #art {
     display: block; margin: 0 auto; width: 96px; height: 96px; border-radius: 16px; object-fit: cover;
     border: 1px solid rgba(0,0,0,0.08);
     box-shadow: 0 4px 16px rgba(0,0,0,0.08);
-    cursor: pointer; user-select: none;
+    cursor: pointer; user-select: none; outline: none; -webkit-tap-highlight-color: transparent;
     transition: border-color .25s;
   }
-  #art:hover { border-color: #2E9BFF; }
+  #art:hover { border-color: rgba(0,0,0,0.08); }
   #cut { margin: 0 auto 12px; color: #5c5e62; font-size: 14px; max-width: 260px; }
   #vis {
     position: absolute; left: 0; right: 0; bottom: 0;
@@ -246,8 +247,6 @@
     }
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(0,0,0,0.06)';
-    ctx.fillRect(0, midY - 0.5, VW, 1);
   }
 
   function startVis() {
@@ -360,11 +359,11 @@ function updateMediaSession(title_, artist_, album_, artKey, size) {
       cutEl.textContent = 'Advertisement';
       cutEl.classList.add('ad');
       artEl.src = artUrl(LOGO_KEY, 320);
-      updateMediaSession('Station break', '', '', LOGO_KEY, 640);
+      updateMediaSession('CNBC - Station break', '', '', LOGO_KEY, 640);
     } else if (cut) {
       cutEl.classList.remove('ad');
       cutEl.textContent = (cut.a && !similar(cut.a, showName) ? cut.a + ' \u00b7 ' : '') + (cut.n || '');
-      updateMediaSession(cut.n || showName, cut.a || showName, showName, key, 640);
+      updateMediaSession('CNBC - ' + showName, cut.n || '', showName, key, 640);
     }
     np.classList.add('on');
   }
