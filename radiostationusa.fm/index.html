@@ -63,6 +63,7 @@
   const title = document.getElementById('title');
   const status = document.getElementById('status');
   const artEl = document.getElementById('art');
+  let lastMetaSig = '';
   const errBox = document.getElementById('err');
   const vis = document.getElementById('vis');
   const ctx = vis.getContext('2d');
@@ -70,7 +71,7 @@
   let PERIOD = 96, baseAmp = 40;
   let midY = 75, hist = null, pen = 0, period = PERIOD, amp = baseAmp;
   let raf = 0;
-  const src = 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
+  const src = 'https://cnbc.mt.linear.viewlift.com/v1/manifest/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/006322a1-de12-4475-96ba-d1232ba576ee/7.m3u8';
   let started = false;
 
   let N = 52, BW = 6, GAP = 3;
@@ -330,8 +331,24 @@ function updateMediaSession(title_, artist_, album_, artKey, size) {
     const meta = { title: title_ };
     if (artist_) meta.artist = artist_;
     if (album_) meta.album = album_;
-    if (artKey) meta.artwork = [{ src: artUrl(artKey, size), sizes: size + 'x' + size }];
-    navigator.mediaSession.metadata = new MediaMetadata(meta);
+    if (artKey) {
+      const type = /\.png$/i.test(artKey) ? 'image/png' : 'image/jpeg';
+      meta.artwork = [{ src: artUrl(artKey, size), sizes: size + 'x' + size, type }];
+    }
+    const sig = JSON.stringify(meta);
+    if (sig === lastMetaSig) return;
+    const apply = () => {
+      lastMetaSig = sig;
+      navigator.mediaSession.metadata = new MediaMetadata(meta);
+    };
+    if (meta.artwork) {
+      const img = new Image();
+      img.onload = apply;
+      img.onerror = apply;
+      img.src = meta.artwork[0].src;
+    } else {
+      apply();
+    }
   }
 
   function similar(a, b) {
@@ -370,7 +387,10 @@ function updateMediaSession(title_, artist_, album_, artKey, size) {
 
   artEl.onerror = () => artEl.src = artUrl(LOGO_KEY, 320);
 
+  let epgBusy = false;
   function pollEpg() {
+    if (epgBusy) return;
+    epgBusy = true;
     const js = "fetch('" + EPG_URL + "',{mode:'cors'}).then(r=>r.json()).then(d=>{"
       + "var ch=d.channels['" + CNBC_GUID + "'];"
       + "var cuts=(ch&&ch.cuts)||[],shows=(ch&&ch.shows)||[];"
@@ -383,11 +403,13 @@ function updateMediaSession(title_, artist_, album_, artKey, size) {
     f.srcdoc = '<scr' + 'ipt>' + js + '</scr' + 'ipt>';
     document.body.appendChild(f);
     setTimeout(() => f.remove(), 30000);
+    setTimeout(() => { epgBusy = false; }, 9000);
   }
 
   window.addEventListener('message', (ev) => {
     const d = ev.data;
     if (!d || d.m !== 'epg') return;
+    epgBusy = false;
     if (d.ok) renderEpg(d.cut, d.show);
     else {
       artEl.src = artUrl(LOGO_KEY, 160);
@@ -397,8 +419,13 @@ function updateMediaSession(title_, artist_, album_, artKey, size) {
 
   artEl.src = artUrl(LOGO_KEY, 320);
   np.classList.add('on');
+  let epgTicks = 0;
+  function epgLoop() {
+    epgTicks++;
+    if (!video.paused || epgTicks % 6 === 0) pollEpg();
+  }
   pollEpg();
-  setInterval(pollEpg, 60000);
+  setInterval(epgLoop, 10000);
 </script>
 </body>
 </html>
