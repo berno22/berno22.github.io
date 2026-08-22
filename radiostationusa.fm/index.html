@@ -15,7 +15,7 @@
           background: #fff; border: 1px solid rgba(0,0,0,0.08); border-radius: 20px;
           box-shadow: 0 8px 40px rgba(0,0,0,0.06); }
   h1 {
-    margin: 12px 0; font-size: 28px; font-weight: 600; letter-spacing: -0.2px; color: #62666a;
+    margin: 12px 0 0; font-size: 28px; font-weight: 600; letter-spacing: -0.2px; color: #62666a;
     font-style: italic;
     cursor: pointer; user-select: none; transition: color .25s; position: relative; z-index: 2;
   }
@@ -23,8 +23,8 @@
   #status { display: none; }
   #status:hover { color: #2f3236; }
   video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-  #err { margin-top: 18px; color: #e82127; font-size: 12px; white-space: pre-wrap; }
-  #err:empty { margin-top: 0; }
+  #err { margin: 12px auto 0; color: #e82127; font-size: 12px; white-space: pre-wrap; }
+  #err:empty { display: none; }
   #np { display: none; text-align: center; }
   #np.on { display: block; animation: fadein .5s ease; }
   @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -42,13 +42,13 @@
           -webkit-mask-repeat: no-repeat; -webkit-mask-position: center;
           mask-image: url('cnbc-logo.png'); mask-size: contain;
           mask-repeat: no-repeat; mask-position: center; }
-  #cut { margin: 0 auto 12px; color: #5c5e62; font-size: 14px; max-width: 320px; }
+  #cut { margin: 12px auto 0; color: #5c5e62; font-size: 14px; max-width: 320px; }
   #cut.ad { font-style: italic; }
-  #credits { margin: 0 auto 12px; color: #83878c; font-size: 12px; line-height: 1.45; max-width: 360px; }
+  #credits { margin: 12px auto 0; color: #83878c; font-size: 12px; line-height: 1.45; max-width: 360px; }
   #credits:empty { display: none; }
-  #desc { margin: 0 auto 12px; color: #83878c; font-size: 12px; line-height: 1.45; max-width: 360px; }
+  #desc { margin: 12px auto 0; color: #83878c; font-size: 12px; line-height: 1.45; max-width: 360px; }
   #desc:empty { display: none; }
-  #upnext { margin: 0 auto 12px; color: #c9ccce; font-size: 12px; line-height: 1.45; max-width: 360px; }
+  #upnext { margin: 12px auto 0; color: #c9ccce; font-size: 12px; line-height: 1.45; max-width: 360px; }
   #upnext:empty { display: none; }
   #vis {
     position: absolute; left: 0; right: 0; bottom: 0;
@@ -413,7 +413,10 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
     const nu = (lastComingUp && lastComingUp[0]) || null;
     upNextEl.textContent = nu ? 'Next | ' + (nu.shortTitle || '') : '';
     const slug = (live.url || '').replace(/\/+$/, '');
-    const img = artMap[slug];
+    const norm = x => (x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const tN = norm(live.shortTitle || live.title), sN = norm(slug);
+    const raw = artMap[slug];
+    const img = raw && tN && (sN.indexOf(tN) === 0 || tN.indexOf(sN) === 0) ? raw : null;
     const showImg = img || artUrl(LOGO_KEY, 320);
     artEl.src = plAd ? artUrl(LOGO_KEY, 320) : showImg;
     updateMediaSession(
