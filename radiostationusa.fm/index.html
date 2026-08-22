@@ -347,15 +347,6 @@
     return ART_BASE + btoa(payload);
   }
 
-function squareArt(u) {
-    try {
-      const url = new URL(u);
-      url.searchParams.set('w', '640');
-      url.searchParams.set('h', '640');
-      return url.toString();
-    } catch (e) { return u; }
-  }
-
 function updateMediaSession(title_, artist_, album_, artSrc) {
     if (!(navigator.mediaSession && window.MediaMetadata)) return;
     const meta = { title: title_ };
@@ -363,7 +354,7 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
     if (album_) meta.album = album_;
     if (artSrc) {
       const type = /\.png/i.test(artSrc.split('?')[0]) ? 'image/png' : 'image/jpeg';
-      meta.artwork = [{ src: squareArt(artSrc), sizes: '', type }];
+      meta.artwork = [{ src: artSrc, sizes: '', type }];
     }
     const sig = JSON.stringify(meta);
     if (sig === lastMetaSig) return;
