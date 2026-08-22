@@ -9,17 +9,18 @@
 <style>
   body { margin: 0; background: #f6f6f4; color: #111;
          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-  #wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  #wrap { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
           background: #f6f6f4; }
   #card { position: relative; z-index: 1; text-align: center; padding: 32px; zoom: 1.69;
           background: #fff; border: 1px solid rgba(0,0,0,0.08); border-radius: 20px;
           box-shadow: 0 8px 40px rgba(0,0,0,0.06); }
   h1 {
     margin: 12px 0; font-size: 28px; font-weight: 600; letter-spacing: -0.2px; color: #62666a;
+    font-style: italic;
     cursor: pointer; user-select: none; transition: color .25s; position: relative; z-index: 2;
   }
   h1:hover { color: #2f3236; }
-  #status { margin: 0; color: #5c5e62; font-size: 14px; min-height: 20px; cursor: pointer; user-select: none; transition: color .25s; position: relative; z-index: 2; }
+  #status { display: none; }
   #status:hover { color: #2f3236; }
   video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   #err { margin-top: 18px; color: #e82127; font-size: 12px; white-space: pre-wrap; }
@@ -28,14 +29,27 @@
   #np.on { display: block; animation: fadein .5s ease; }
   @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
   #art {
-    display: block; margin: 0 auto; width: 96px; height: 96px; border-radius: 16px; object-fit: cover;
+    display: block; margin: 0 auto; height: 173px; width: auto; max-width: 600px; border-radius: 12px; object-fit: contain;
     border: 1px solid rgba(0,0,0,0.08);
     box-shadow: 0 4px 16px rgba(0,0,0,0.08);
     cursor: pointer; user-select: none; outline: none; -webkit-tap-highlight-color: transparent;
     transition: border-color .25s;
   }
   #art:hover { border-color: rgba(0,0,0,0.08); }
-  #cut { margin: 0 auto 12px; color: #5c5e62; font-size: 14px; max-width: 260px; }
+  #brand { width: 132px; aspect-ratio: 900 / 506; pointer-events: none; margin-bottom: 18px;
+          background: #a3a6aa;
+          -webkit-mask-image: url('cnbc-logo.png'); -webkit-mask-size: contain;
+          -webkit-mask-repeat: no-repeat; -webkit-mask-position: center;
+          mask-image: url('cnbc-logo.png'); mask-size: contain;
+          mask-repeat: no-repeat; mask-position: center; }
+  #cut { margin: 0 auto 12px; color: #5c5e62; font-size: 14px; max-width: 320px; }
+  #cut.ad { font-style: italic; }
+  #credits { margin: 0 auto 12px; color: #83878c; font-size: 12px; line-height: 1.45; max-width: 360px; }
+  #credits:empty { display: none; }
+  #desc { margin: 0 auto 12px; color: #83878c; font-size: 12px; line-height: 1.45; max-width: 360px; }
+  #desc:empty { display: none; }
+  #upnext { margin: 0 auto 12px; color: #c9ccce; font-size: 12px; line-height: 1.45; max-width: 360px; }
+  #upnext:empty { display: none; }
   #vis {
     position: absolute; left: 0; right: 0; bottom: 0;
     width: 100%; height: 330px; z-index: 0; pointer-events: none;
@@ -46,13 +60,17 @@
 </head>
 <body>
 <div id="wrap">
+  <div id="brand" role="img" aria-label="CNBC"></div>
   <div id="card">
+    <p id="status">Loading&hellip;</p>
     <div id="np">
       <img id="art" alt="">
     </div>
     <h1 id="title">CNBC Audio</h1>
     <div id="cut"></div>
-    <p id="status">Loading&hellip;</p>
+    <div id="credits"></div>
+    <div id="desc"></div>
+    <div id="upnext"></div>
     <div id="err"></div>
   </div>
   <canvas id="vis"></canvas>
@@ -314,26 +332,38 @@
     window.addEventListener('DOMContentLoaded', start);
   }
 
-  const CNBC_GUID = '2b6effb8-eb0e-7421-d7bb-d843a9ff3ce1';
-  const EPG_URL = 'https://lookaround-cache-prod.streaming.siriusxm.com/playbackservices/v1/live/lookAround';
+  const GUIDE_URL = 'https://webql-redesign.cnbcfm.com/graphql';
   const ART_BASE = 'https://imgsrv-sxm-prod-device.streaming.siriusxm.com/';
   const LOGO_KEY = 'if/68/68a5fed8ea323a848dd0014bb8c9ddb3_1782186558.png';
+  let artMap = {};
   const np = document.getElementById('np');
   const cutEl = document.getElementById('cut');
+  const creditsEl = document.getElementById('credits');
+  const descEl = document.getElementById('desc');
+  const upNextEl = document.getElementById('upnext');
 
   function artUrl(artKey, size) {
     const payload = JSON.stringify({ key: artKey, edits: [{ resize: { width: size, height: size } }] });
     return ART_BASE + btoa(payload);
   }
 
-function updateMediaSession(title_, artist_, album_, artKey, size) {
+function squareArt(u) {
+    try {
+      const url = new URL(u);
+      url.searchParams.set('w', '640');
+      url.searchParams.set('h', '640');
+      return url.toString();
+    } catch (e) { return u; }
+  }
+
+function updateMediaSession(title_, artist_, album_, artSrc) {
     if (!(navigator.mediaSession && window.MediaMetadata)) return;
     const meta = { title: title_ };
     if (artist_) meta.artist = artist_;
     if (album_) meta.album = album_;
-    if (artKey) {
-      const type = /\.png$/i.test(artKey) ? 'image/png' : 'image/jpeg';
-      meta.artwork = [{ src: artUrl(artKey, size), sizes: size + 'x' + size, type }];
+    if (artSrc) {
+      const type = /\.png/i.test(artSrc.split('?')[0]) ? 'image/png' : 'image/jpeg';
+      meta.artwork = [{ src: squareArt(artSrc), sizes: '', type }];
     }
     const sig = JSON.stringify(meta);
     if (sig === lastMetaSig) return;
@@ -343,7 +373,10 @@ function updateMediaSession(title_, artist_, album_, artKey, size) {
     };
     if (meta.artwork) {
       const img = new Image();
-      img.onload = apply;
+      img.onload = () => {
+        try { meta.artwork[0].sizes = img.naturalWidth + 'x' + img.naturalHeight; } catch (e) {}
+        apply();
+      };
       img.onerror = apply;
       img.src = meta.artwork[0].src;
     } else {
@@ -351,81 +384,152 @@ function updateMediaSession(title_, artist_, album_, artKey, size) {
     }
   }
 
-  function similar(a, b) {
-    a = (a || '').toLowerCase(); b = (b || '').toLowerCase();
-    if (a === b) return true;
-    const wa = a.split(/\s+/), wb = b.split(/\s+/);
-    const min = Math.min(wa.length, wb.length);
-    let same = 0;
-    while (same < min && wa[same] === wb[same]) same++;
-    return same >= Math.min(2, min);
+  function renderBreak() {
+    cutEl.textContent = 'Advertisement';
+    cutEl.classList.add('ad');
+    artEl.src = artUrl(LOGO_KEY, 320);
+    updateMediaSession('CNBC - Advertisement', '', '', artUrl(LOGO_KEY, 640));
   }
 
-  function renderEpg(cut, show) {
-    let showName = (show && show.n) ? show.n : '';
-    const cur = cut && !cut.ad ? cut : null;
-    if (!showName && cur && cur.a) showName = cur.a;
-    const key = (show && show.k && similar(showName, show.n)) ? show.k : LOGO_KEY;
-    artEl.src = artUrl(key, 320);
-    if (showName) {
-      title.textContent = showName;
-      document.title = showName + ' \u00b7 CNBC Audio';
-    }
-    const isBreak = cut && (cut.ad || /station break|advertisement/i.test(cut.n || ''));
-    if (isBreak) {
+  function renderShow(live) {
+    if (!live || !live.title) return;
+    title.textContent = live.title;
+    document.title = live.title + ' \u00b7 CNBC Audio';
+    if (plAd) {
       cutEl.textContent = 'Advertisement';
       cutEl.classList.add('ad');
-      artEl.src = artUrl(LOGO_KEY, 320);
-      updateMediaSession('CNBC - Station break', '', '', LOGO_KEY, 640);
-    } else if (cut) {
+    } else {
       cutEl.classList.remove('ad');
-      cutEl.textContent = (cut.a && !similar(cut.a, showName) ? cut.a + ' \u00b7 ' : '') + (cut.n || '');
-      updateMediaSession('CNBC - ' + showName, cut.n || '', showName, key, 640);
+      const bits = [];
+      if (live.startTimeFormatted && live.endTimeFormatted)
+        bits.push(live.startTimeFormatted + ' \u2013 ' + live.endTimeFormatted);
+      if (live.displayGenre) bits.push(live.displayGenre);
+      if (live.tvSeasonNumber && live.seriesEpisodeNumber)
+        bits.push('S' + live.tvSeasonNumber + ' E' + live.seriesEpisodeNumber);
+      cutEl.textContent = bits.join(' \u00b7 ');
     }
+    creditsEl.textContent = fmtCredits(live.credits);
+    descEl.textContent = live.description || '';
+    const nu = (lastComingUp && lastComingUp[0]) || null;
+    upNextEl.textContent = nu ? 'Next | ' + (nu.shortTitle || '') : '';
+    const slug = (live.url || '').replace(/\/+$/, '');
+    const img = artMap[slug];
+    const showImg = img || artUrl(LOGO_KEY, 320);
+    artEl.src = plAd ? artUrl(LOGO_KEY, 320) : showImg;
+    updateMediaSession(
+      'CNBC - ' + (plAd ? 'Advertisement' : live.title), '',
+      live.displayGenre || '',
+      plAd ? artUrl(LOGO_KEY, 640) : showImg
+    );
     np.classList.add('on');
+  }
+
+  function fmtCredits(c) {
+    if (!c) return '';
+    if (typeof c === 'string') return c;
+    if (Array.isArray(c)) return c.map(x =>
+      typeof x === 'string' ? x
+      : [x.name || x.person || x.title, x.role].filter(Boolean).join(' \u2013 ')
+    ).filter(Boolean).join(', ');
+    if (typeof c === 'object') return c.text || c.summary || '';
+    return '';
+  }
+
+  let guideBusy = false, pendingGuide = false, guideTimer = null, lastComingUp = null;
+  function fetchGuide() {
+    if (guideBusy) return;
+    guideBusy = true;
+    clearTimeout(guideTimer);
+    guideTimer = setTimeout(() => { guideBusy = false; maybeGuide(); }, 9000);
+    fetch(GUIDE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        operationName: 'showsSchedule',
+        variables: { primeTime: false, scheduleDateStart: 0, scheduleDateEnd: 0 },
+        query: 'query showsSchedule($primeTime: Boolean, $scheduleDateStart: Int, $scheduleDateEnd: Int) { showsSchedule(primeTime: $primeTime, scheduleDateStart: $scheduleDateStart, scheduleDateEnd: $scheduleDateEnd) { live { episodeGuid title shortTitle url startTimeFormatted endTimeFormatted description displayGenre credits tvSeasonNumber seriesEpisodeNumber } comingUp { shortTitle startTimeFormatted } } }'
+      })
+    }).then(r => r.json()).then(d => {
+      guideBusy = false;
+      const g = d.data && d.data.showsSchedule;
+      lastComingUp = (g && g.comingUp) || null;
+      renderShow(g && g.live);
+      if (pendingGuide) { pendingGuide = false; fetchGuide(); }
+    }).catch(() => { guideBusy = false; });
+  }
+
+  function maybeGuide() {
+    if (!guideBusy) { pendingGuide = false; fetchGuide(); }
+    else pendingGuide = true;
   }
 
   artEl.onerror = () => artEl.src = artUrl(LOGO_KEY, 320);
 
-  let epgBusy = false;
-  function pollEpg() {
-    if (epgBusy) return;
-    epgBusy = true;
-    const js = "fetch('" + EPG_URL + "',{mode:'cors'}).then(r=>r.json()).then(d=>{"
-      + "var ch=d.channels['" + CNBC_GUID + "'];"
-      + "var cuts=(ch&&ch.cuts)||[],shows=(ch&&ch.shows)||[];"
-      + "var cut=cuts[cuts.length-1]||null,show=shows[shows.length-1]||null;"
-      + "parent.postMessage({m:'epg',ok:true,cut:cut?{n:cut.name,a:cut.artistName,ad:!!cut.isAd}:null,show:show?{n:show.name,k:show.image.url}:null},'*');"
-      + "}).catch(e=>parent.postMessage({m:'epg',ok:false,e:String(e)},'*'));";
+  window.addEventListener('message', (ev) => {
+    const d = ev.data;
+    if (!d || d.m !== 'pl') return;
+    plBusy = false;
+    handlePl(d);
+  });
+
+  let plBusy = false;
+  function pollPlaylist() {
+    if (plBusy || !started) return;
+    plBusy = true;
+    const js = "fetch('" + src + "',{mode:'cors',cache:'no-store'}).then(r=>r.text()).then(t=>{"
+      + "var ep=null,ad=false,re=/DATERANGE:[^\\n]*/g,m,rp=/EXT-X-PROGRAM-DATE-TIME:([^\\r\\n]+)/g,pm,pdt=null;"
+      + "while((pm=rp.exec(t))){var pv=Date.parse(pm[1].trim());if(!isNaN(pv))pdt=pv;}"
+      + "var now=pdt!==null?pdt:Date.now();"
+      + "while((m=re.exec(t))){"
+      + "var line=m[0];"
+      + "var sm=line.match(/START-DATE=\"([^\"]+)\"/);if(!sm)continue;"
+      + "var st=Date.parse(sm[1]);if(isNaN(st))continue;"
+      + "var dm=line.match(/PLANNED-DURATION=([0-9.]+)/);var dur=dm?parseFloat(dm[1]):0;"
+      + "var hm=line.match(/SCTE35(?:-OUT)?=0x([0-9a-fA-F]+)/);"
+      + "var em=null;if(hm){var hex=hm[1],s='';for(var i=0;i<hex.length;i+=2)s+=String.fromCharCode(parseInt(hex.substr(i,2),16));em=s.match(/EP[0-9A-Za-z]+/);}"
+      + "var inwin=dur>0&&now>=st&&now<st+dur*1000;"
+      + "if(inwin&&dur>900&&em&&!ep)ep=em[0];"
+      + "if(inwin&&dur>0&&dur<=900)ad=true;"
+      + "}"
+      + "parent.postMessage({m:'pl',ep:ep,ad:ad},'*');"
+      + "}).catch(e=>parent.postMessage({m:'pl',err:String(e)},'*'));";
     const f = document.createElement('iframe');
     f.sandbox = 'allow-scripts';
     f.style.display = 'none';
     f.srcdoc = '<scr' + 'ipt>' + js + '</scr' + 'ipt>';
     document.body.appendChild(f);
-    setTimeout(() => f.remove(), 30000);
-    setTimeout(() => { epgBusy = false; }, 9000);
+    setTimeout(() => f.remove(), 20000);
+    setTimeout(() => { plBusy = false; }, 8000);
   }
 
-  window.addEventListener('message', (ev) => {
-    const d = ev.data;
-    if (!d || d.m !== 'epg') return;
-    epgBusy = false;
-    if (d.ok) renderEpg(d.cut, d.show);
-    else {
-      artEl.src = artUrl(LOGO_KEY, 160);
-      updateMediaSession('CNBC Audio', '', '', LOGO_KEY, 640);
+  let plEp = null, plAd = false;
+  function handlePl(d) {
+    window.__plg = window.__plg || { n: 0 };
+    window.__plg.n++;
+    window.__plg.last = d.err ? { err: d.err } : { ep: d.ep, ad: d.ad };
+    const wasAd = plAd, wasEp = plEp;
+    plAd = !!d.ad;
+    if (d.ep) plEp = d.ep;
+    const epChanged = d.ep && wasEp !== null && d.ep !== wasEp;
+    const adOn = plAd && !wasAd;
+    const adOff = !plAd && wasAd;
+    if (adOn) renderBreak();
+    else if (adOff || epChanged) {
+      maybeGuide();
     }
-  });
+  }
 
   artEl.src = artUrl(LOGO_KEY, 320);
   np.classList.add('on');
-  let epgTicks = 0;
-  function epgLoop() {
-    epgTicks++;
-    if (!video.paused || epgTicks % 6 === 0) pollEpg();
-  }
-  pollEpg();
-  setInterval(epgLoop, 10000);
+  let tick = 0;
+  setInterval(() => {
+    tick++;
+    const playing = !video.paused;
+    if (playing || tick % 6 === 0) pollPlaylist();
+    const wantGuide = (playing && tick % 6 === 0) || (!playing && tick % 12 === 0);
+    if ((wantGuide || pendingGuide || tick % 360 === 0) && !guideBusy) { pendingGuide = false; fetchGuide(); }
+  }, 10000);
+  fetch('art.json').then(r => r.json()).then(m => { artMap = m; }).catch(() => {}).finally(() => fetchGuide());
 </script>
 </body>
 </html>
