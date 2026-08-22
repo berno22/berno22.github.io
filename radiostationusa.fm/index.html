@@ -372,12 +372,21 @@
     return ART_BASE + btoa(payload);
   }
 
+function sqArt(u) {
+    if (!/image\.cnbcfm\.com/.test(u)) return u;
+    const i = u.indexOf('?');
+    const q = new URLSearchParams(i < 0 ? '' : u.slice(i + 1));
+    q.set('w', '640'); q.set('h', '640');
+    return (i < 0 ? u : u.slice(0, i)) + '?' + q.toString();
+}
+
 function updateMediaSession(title_, artist_, album_, artSrc) {
     if (!(navigator.mediaSession && window.MediaMetadata)) return;
     const meta = { title: title_ };
     if (artist_) meta.artist = artist_;
     if (album_) meta.album = album_;
     if (artSrc) {
+      artSrc = sqArt(artSrc);
       const type = /\.png/i.test(artSrc.split('?')[0]) ? 'image/png' : 'image/jpeg';
       meta.artwork = [{ src: artSrc, sizes: '', type }];
     }
