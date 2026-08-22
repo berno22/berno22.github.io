@@ -308,28 +308,44 @@
   }
   updateMediaSession('CNBC Audio');
 
+  function startHls(waited) {
+    if (!window.Hls) {
+      if ((waited || 0) < 40) setTimeout(() => startHls((waited || 0) + 1), 250);
+      else setError('HLS is not supported in this browser');
+      return;
+    }
+    if (!Hls.isSupported()) { setError('HLS is not supported in this browser'); return; }
+    const hls = new Hls({ enableWorker: true });
+    hls.on(Hls.Events.ERROR, (_, data) => {
+      if (data.fatal) { setError(data.type + ': ' + data.details + ' - reloading'); autoReload(); }
+    });
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      setLive();
+      setStatus('Click to play');
+    });
+    hls.loadSource(src);
+    hls.attachMedia(video);
+  }
+
   function start() {
     const native = !!(video.canPlayType && video.canPlayType('application/vnd.apple.mpegurl') !== '');
     if (native) {
       video.src = src;
-      video.addEventListener('loadedmetadata', () => {
+      const onMeta = () => {
+        video.removeEventListener('loadedmetadata', onMeta);
+        video.removeEventListener('error', onErr);
         setLive();
         setStatus('Click to play');
-      });
-      video.addEventListener('error', () => setError(video.error && video.error.message));
-    } else if (window.Hls && Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true });
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) { setError(data.type + ': ' + data.details + ' - reloading'); autoReload(); }
-      });
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setLive();
-        setStatus('Click to play');
-      });
-      hls.loadSource(src);
-      hls.attachMedia(video);
+      };
+      const onErr = () => {
+        video.removeEventListener('loadedmetadata', onMeta);
+        video.removeEventListener('error', onErr);
+        startHls();
+      };
+      video.addEventListener('loadedmetadata', onMeta);
+      video.addEventListener('error', onErr);
     } else {
-      setError('HLS is not supported in this browser');
+      startHls();
     }
   }
 
@@ -539,13 +555,7 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
   }
 
   let plEp = null, plAd = false;
-  let plEnd = 0, plNow = 0, plAnchor = 0;
 
-  function updateCountdown() {
-    if (!plAd || !plEnd) return;
-    const rem = Math.max(0, Math.ceil((plEnd - (plNow + (Date.now() - plAnchor))) / 1000));
-    cutEl.textContent = rem > 0 ? 'Ad Break ending in ' + rem + 's' : 'Advertisement';
-  }
   let lastLive = null;
   let sxmKeys = {};
   try { sxmKeys = JSON.parse(localStorage.getItem('sxmArtKeys') || '{}'); } catch (e) {}
@@ -554,9 +564,6 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
     window.__plg = window.__plg || { n: 0 };
     window.__plg.n++;
     window.__plg.last = d.err ? { err: d.err } : { ep: d.ep, ad: d.ad };
-    plEnd = d.end || 0;
-    plNow = d.now || 0;
-    plAnchor = Date.now();
     const wasAd = plAd, wasEp = plEp;
     plAd = !!d.ad;
     if (d.ep) plEp = d.ep;
@@ -567,10 +574,7 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
     else if (adOff || epChanged) {
       maybeGuide();
     }
-    updateCountdown();
   }
-
-  setInterval(updateCountdown, 1000);
 
   artEl.src = artUrl(LOGO_KEY, 320);
   np.classList.add('on');
