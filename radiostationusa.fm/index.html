@@ -360,6 +360,8 @@
   const EPG_URL = 'https://lookaround-cache-prod.streaming.siriusxm.com/playbackservices/v1/live/lookAround';
   const CNBC_GUID = '2b6effb8-eb0e-7421-d7bb-d843a9ff3ce1';
   const LOGO_KEY = 'if/68/68a5fed8ea323a848dd0014bb8c9ddb3_1782186558.png';
+  const ART_LOGO = 'art/logo.png';
+  const dataArtCache = {};
   let artMap = {};
   const np = document.getElementById('np');
   const cutEl = document.getElementById('cut');
@@ -393,7 +395,8 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
     const sig = JSON.stringify(meta);
     if (sig === lastMetaSig) return;
     const apply = () => {
-      if (meta.artwork) meta.artwork[0].src += (meta.artwork[0].src.indexOf('?') < 0 ? '?' : '&') + '_cb=' + Date.now();
+      if (meta.artwork && meta.artwork[0].src.indexOf('data:') !== 0)
+        meta.artwork[0].src += (meta.artwork[0].src.indexOf('?') < 0 ? '?' : '&') + '_cb=' + Date.now();
       lastMetaSig = sig;
       navigator.mediaSession.metadata = new MediaMetadata(meta);
     };
@@ -402,10 +405,24 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
         const img = new Image();
         img.onload = () => {
           try { meta.artwork[0].sizes = img.naturalWidth + 'x' + img.naturalHeight; } catch (e) {}
+          let out = src;
+          if (!isFallback && src.indexOf('art/') === 0) {
+            if (dataArtCache[src]) out = dataArtCache[src];
+            else {
+              try {
+                const w = img.naturalWidth, h = img.naturalHeight, side = Math.min(w, h);
+                const cv = document.createElement('canvas'); cv.width = cv.height = side;
+                cv.getContext('2d').drawImage(img, (w - side) / 2, (h - side) / 2, side, side, 0, 0, side, side);
+                out = cv.toDataURL(/\.png$/i.test(src) ? 'image/png' : 'image/jpeg', 0.9);
+                dataArtCache[src] = out;
+              } catch (e) { out = src; }
+            }
+          }
+          meta.artwork[0].src = out;
           apply();
         };
         img.onerror = () => {
-          if (!isFallback) { meta.artwork[0].src = artUrl(LOGO_KEY, 640); attempt(meta.artwork[0].src, true); }
+          if (!isFallback) { meta.artwork[0].src = ART_LOGO; attempt(ART_LOGO, true); }
         };
         img.src = src;
       };
@@ -418,8 +435,8 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
   function renderBreak() {
     cutEl.textContent = 'Advertisement';
     cutEl.classList.add('ad');
-    artEl.src = artUrl(LOGO_KEY, 320);
-    updateMediaSession('CNBC - Advertisement', '', '', artUrl(LOGO_KEY, 640));
+    artEl.src = ART_LOGO;
+    updateMediaSession('CNBC - Advertisement', '', '', ART_LOGO);
   }
 
   function renderShow(live) {
@@ -448,14 +465,16 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
     const norm = x => (x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
     const tN = norm(live.shortTitle || live.title), sN = norm(slug);
     const raw = artMap[slug];
-    const img = raw && tN && (sN.indexOf(tN) === 0 || tN.indexOf(sN) === 0) ? raw : null;
-    const showImg = img || artUrl(LOGO_KEY, 320);
-    artEl.src = plAd ? artUrl(LOGO_KEY, 320) : showImg;
-    const lockImg = sxmKeys[tN] ? artUrl(sxmKeys[tN], 640) : null;
+    const okRaw = raw && tN && (sN.indexOf(tN) === 0 || tN.indexOf(sN) === 0);
+    const localArt = okRaw ? (raw.local || null) : null;
+    const showImg = localArt || (okRaw && raw.url) || ART_LOGO;
+    artEl.src = plAd ? ART_LOGO : showImg;
+    const lockImg = plAd ? ART_LOGO
+      : (localArt || (sxmKeys[tN] ? artUrl(sxmKeys[tN], 640) : null) || showImg);
     updateMediaSession(
       'CNBC - ' + (plAd ? 'Advertisement' : live.title), '',
       live.displayGenre || '',
-      plAd ? artUrl(LOGO_KEY, 640) : (lockImg || showImg)
+      lockImg
     );
     np.classList.add('on');
   }
@@ -574,6 +593,7 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
   let lastLive = null;
   let sxmKeys = {};
   try { sxmKeys = JSON.parse(localStorage.getItem('sxmArtKeys') || '{}'); } catch (e) {}
+  fetch('sxm-keys.json').then(r => r.json()).then(k => { for (const a in k) if (!sxmKeys[a]) sxmKeys[a] = k[a]; }).catch(() => {});
   let sxmLast = 0;
   function handlePl(d) {
     window.__plg = window.__plg || { n: 0 };
@@ -591,7 +611,7 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
     }
   }
 
-  artEl.src = artUrl(LOGO_KEY, 320);
+  artEl.src = ART_LOGO;
   np.classList.add('on');
   let tick = 0;
   setInterval(() => {
