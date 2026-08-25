@@ -454,7 +454,9 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
     creditsEl.textContent = fmtCredits(live.credits);
     descEl.textContent = live.description || '';
     const nu = (lastComingUp && lastComingUp[0]) || null;
-    upNextEl.textContent = nu ? 'Next | ' + (nu.shortTitle || '') : '';
+    const tm = nu && (nu.startTimeFormatted || '').match(/(\d{1,2})(?::(\d\d))?\s*(am|pm)/i);
+    const at = tm ? ' at ' + parseInt(tm[1], 10) + (tm[2] && tm[2] !== '00' ? ':' + tm[2] : '') + tm[3][0].toLowerCase() : '';
+    upNextEl.textContent = nu ? 'Next' + at + ' | ' + (nu.shortTitle || '') : '';
     const slug = (live.url || '').replace(/\/+$/, '');
     const norm = x => (x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
     const tN = norm(live.shortTitle || live.title), sN = norm(slug);
