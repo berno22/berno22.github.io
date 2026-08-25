@@ -5,6 +5,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p art
 
+# Canonical ad/fallback logo tile (SXM-rendered CNBC brand square)
+LOGO_KEY='if/68/68a5fed8ea323a848dd0014bb8c9ddb3_1782186558.png'
+LOGO_URL="https://imgsrv-sxm-prod-device.streaming.siriusxm.com/$(python3 -c "import base64,json;print(base64.b64encode(json.dumps({'key':'$LOGO_KEY','edits':[{'resize':{'width':640,'height':640}}]}).encode()).decode())")"
+curl -sf -A "Mozilla/5.0" -o art/logo.png "$LOGO_URL" && echo "ok   logo -> art/logo.png"
+
 python3 - <<'PY'
 import json, subprocess, sys
 
