@@ -27,9 +27,9 @@ def square_url(u):
     return base + '?' + urlencode(q), ext
 
 changed = False
-for slug, ent in m.items():
+for slug, ent in list(m.items()):
     if isinstance(ent, str):          # migrate old string shape
-        ent = {'url': ent}; changed = True
+        ent = {'url': ent}; m[slug] = ent; changed = True
     if ent.get('local'):
         print(f"skip {slug} ({ent['local']})")
         continue

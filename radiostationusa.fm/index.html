@@ -16,7 +16,6 @@
           box-shadow: 0 8px 40px rgba(0,0,0,0.06); }
   h1 {
     margin: 12px 0 0; font-size: 28px; font-weight: 600; letter-spacing: -0.2px; color: #62666a;
-    font-style: italic;
     cursor: pointer; user-select: none; transition: color .25s; position: relative; z-index: 2;
   }
   h1:hover { color: #2f3236; }
@@ -43,6 +42,7 @@
           mask-image: url('cnbc-logo.png'); mask-size: contain;
           mask-repeat: no-repeat; mask-position: center; }
   #cut { margin: 12px auto 0; color: #5c5e62; font-size: 14px; max-width: 320px; }
+  #cut:empty { display: none; }
   #cut.ad { font-style: italic; }
   #credits { margin: 12px auto 0; color: #83878c; font-size: 12px; line-height: 1.45; max-width: 360px; }
   #credits:empty { display: none; }
@@ -448,14 +448,8 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
       cutEl.textContent = 'Advertisement';
       cutEl.classList.add('ad');
     } else {
+      cutEl.textContent = '';
       cutEl.classList.remove('ad');
-      const bits = [];
-      if (live.startTimeFormatted && live.endTimeFormatted)
-        bits.push(live.startTimeFormatted + ' \u2013 ' + live.endTimeFormatted);
-      if (live.displayGenre) bits.push(live.displayGenre);
-      if (live.tvSeasonNumber && live.seriesEpisodeNumber)
-        bits.push('S' + live.tvSeasonNumber + ' E' + live.seriesEpisodeNumber);
-      cutEl.textContent = bits.join(' \u00b7 ');
     }
     creditsEl.textContent = fmtCredits(live.credits);
     descEl.textContent = live.description || '';
@@ -467,10 +461,13 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
     const raw = artMap[slug];
     const okRaw = raw && tN && (sN.indexOf(tN) === 0 || tN.indexOf(sN) === 0);
     const localArt = okRaw ? (raw.local || null) : null;
-    const showImg = localArt || (okRaw && raw.url) || ART_LOGO;
-    artEl.src = plAd ? ART_LOGO : showImg;
+    const splashUrl = (okRaw && raw.url) || null;
+    artEl.src = plAd ? ART_LOGO : (splashUrl || ART_LOGO);
     const lockImg = plAd ? ART_LOGO
-      : (localArt || (sxmKeys[tN] ? artUrl(sxmKeys[tN], 640) : null) || showImg);
+      : (localArt
+        || (sxmKeys[tN] ? artUrl(sxmKeys[tN], 640) : null)
+        || (splashUrl ? sqArt(splashUrl) : null)
+        || ART_LOGO);
     updateMediaSession(
       'CNBC - ' + (plAd ? 'Advertisement' : live.title), '',
       live.displayGenre || '',
@@ -621,7 +618,7 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
     const wantGuide = (playing && tick % 15 === 0) || (!playing && tick % 30 === 0);
     if ((wantGuide || pendingGuide || tick % 900 === 0) && !guideBusy) { pendingGuide = false; fetchGuide(); }
   }, 4000);
-  fetch('art.json').then(r => r.json()).then(m => { artMap = m; }).catch(() => {}).finally(() => fetchGuide());
+  fetch('art.json').then(r => r.json()).then(m => { for (const k in m) artMap[k] = typeof m[k] === 'string' ? { url: m[k] } : m[k]; }).catch(() => {}).finally(() => fetchGuide());
 </script>
 </body>
 </html>
