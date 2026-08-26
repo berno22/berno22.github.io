@@ -39,14 +39,9 @@
   }
 
   function tryAutoplay() {
-    video.muted = false;
+    video.muted = true;
     disableSubtitles();
-    video.play().then(() => {
-      overlay.classList.add('hidden');
-      video.controls = true;
-    }).catch(() => {
-      // Browser blocked unmuted autoplay - keep overlay for manual tap
-    });
+    video.play().catch(() => {});
   }
 
   function start() {
