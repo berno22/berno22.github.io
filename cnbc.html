@@ -33,11 +33,11 @@
   function setError(msg) { errBox.textContent = 'Error: ' + msg; }
 
   function tryAutoplay() {
-    overlay.classList.add('hidden');
     video.muted = true;
-    video.play().catch(e => {
+    video.play().then(() => {
+      overlay.classList.add('hidden');
+    }).catch(e => {
       overlay.classList.remove('hidden');
-      errBox.textContent = 'Autoplay blocked (' + e.message + ') - click to play';
     });
   }
 
@@ -59,7 +59,11 @@
     }
   }
 
-  overlay.addEventListener('click', () => { video.play(); });
+  overlay.addEventListener('click', () => {
+    video.muted = false;
+    video.play();
+    overlay.classList.add('hidden');
+  });
 
   if (document.readyState === 'complete' || document.readyState === 'interactive') {
     start();
