@@ -89,6 +89,7 @@
   const status = document.getElementById('status');
   const artEl = document.getElementById('art');
   let lastMetaSig = '';
+  let lastMetaObj = null;
   const errBox = document.getElementById('err');
   const vis = document.getElementById('vis');
   const ctx = vis.getContext('2d');
@@ -155,6 +156,11 @@
     setStatus('Stuck - reloading\u2026');
     setTimeout(refresh, 600);
   }
+
+  setInterval(() => {
+    if (!started || !lastMetaObj || !navigator.mediaSession) return;
+    try { navigator.mediaSession.metadata = new MediaMetadata(lastMetaObj); } catch (e) {}
+  }, 15000);
 
   let lastTime = -1;
   let stuck = 0;
@@ -394,8 +400,8 @@ function updateMediaSession(title_, artist_, album_, artSrc) {
     const sig = JSON.stringify(meta);
     if (sig === lastMetaSig) return;
     const apply = () => {
-      if (meta.artwork) meta.artwork[0].src += (meta.artwork[0].src.indexOf('?') < 0 ? '?' : '&') + '_cb=' + Date.now();
       lastMetaSig = sig;
+      lastMetaObj = meta;
       navigator.mediaSession.metadata = new MediaMetadata(meta);
     };
     if (meta.artwork) {
