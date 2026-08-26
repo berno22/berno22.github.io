@@ -20,7 +20,7 @@
 </head>
 <body>
 <div id="wrap">
-  <video id="video" controls muted playsinline preload="auto"></video>
+  <video id="video" muted playsinline preload="auto"></video>
   <div id="overlay">Click to play</div>
   <div id="err"></div>
 </div>
@@ -61,6 +61,7 @@
 
   overlay.addEventListener('click', () => {
     video.muted = false;
+    video.controls = true;
     video.play();
     overlay.classList.add('hidden');
   });
