@@ -11,7 +11,7 @@
   video { width: 100%; height: 100%; background: #000; }
   #overlay {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: #111; color: #fff; font: 16px system-ui; cursor: pointer; z-index: 10;
+    background: rgba(0,0,0,0.55); color: #fff; font: 16px system-ui; cursor: pointer; z-index: 10;
   }
   #overlay.hidden { display: none; }
   #err { position: absolute; top: 8px; left: 8px; right: 8px; color: #f66;
@@ -32,23 +32,34 @@
 
   function setError(msg) { errBox.textContent = 'Error: ' + msg; }
 
+  function disableSubtitles() {
+    const tracks = video.textTracks;
+    if (!tracks) return;
+    for (let i = 0; i < tracks.length; i++) tracks[i].mode = 'disabled';
+  }
+
   function tryAutoplay() {
     video.muted = true;
+    disableSubtitles();
     video.play().catch(() => {});
   }
 
   function start() {
     if (window.Hls && Hls.isSupported()) {
       const hls = new Hls({ enableWorker: true });
+      hls.subtitleDisplay = false;
+      hls.subtitleTrack = -1;
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) setError(data.type + ': ' + data.details);
       });
       hls.on(Hls.Events.MANIFEST_PARSED, tryAutoplay);
+      hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, disableSubtitles);
       hls.loadSource(src);
       hls.attachMedia(video);
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = src;
       video.addEventListener('loadedmetadata', tryAutoplay);
+      video.textTracks.addEventListener('addtrack', disableSubtitles);
       video.addEventListener('error', () => setError(video.error && video.error.message));
     } else {
       setError('HLS is not supported in this browser');
@@ -58,6 +69,7 @@
   overlay.addEventListener('click', () => {
     video.muted = false;
     video.controls = true;
+    disableSubtitles();
     video.play().catch(() => {});
     overlay.classList.add('hidden');
   });
