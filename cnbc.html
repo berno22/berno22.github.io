@@ -21,7 +21,7 @@
 <body>
 <div id="wrap">
   <video id="video" muted playsinline preload="auto"></video>
-  <div id="overlay">Click to play</div>
+  <div id="overlay">Tap for sound</div>
   <div id="err"></div>
 </div>
 <script>
@@ -34,11 +34,7 @@
 
   function tryAutoplay() {
     video.muted = true;
-    video.play().then(() => {
-      overlay.classList.add('hidden');
-    }).catch(e => {
-      overlay.classList.remove('hidden');
-    });
+    video.play().catch(() => {});
   }
 
   function start() {
@@ -62,7 +58,7 @@
   overlay.addEventListener('click', () => {
     video.muted = false;
     video.controls = true;
-    video.play();
+    video.play().catch(() => {});
     overlay.classList.add('hidden');
   });
 
