@@ -89,6 +89,7 @@
   const status = document.getElementById('status');
   const artEl = document.getElementById('art');
   const ART_LOGO = 'art/logo.png';
+  let mediaMeta = null;
   const errBox = document.getElementById('err');
   const vis = document.getElementById('vis');
   const ctx = vis.getContext('2d');
@@ -380,21 +381,41 @@ function sqArt(u) {
     return (i < 0 ? u : u.slice(0, i)) + '?' + q.toString();
 }
 
-function updateMediaSession(title_, artist_, album_, artSrc) {
+  function updateMediaSession(title_, artist_, album_, artSrc) {
     if (!(navigator.mediaSession && window.MediaMetadata)) return;
-    const md = navigator.mediaSession.metadata;
-    if (!md) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: title_,
-        artist: artist_ || '',
-        album: album_ || '',
+    const title = title_ || '';
+    const artist = artist_ || '';
+    const album = album_ || '';
+    if (!mediaMeta) {
+      mediaMeta = new MediaMetadata({
+        title: title,
+        artist: artist,
+        album: album,
         artwork: [{ src: ART_LOGO, sizes: '640x640', type: 'image/png' }]
       });
-      return;
+      navigator.mediaSession.metadata = mediaMeta;
+    } else {
+      mediaMeta.title = title;
+      mediaMeta.artist = artist;
+      mediaMeta.album = album;
     }
-    md.title = title_ || '';
-    if (artist_ !== undefined) md.artist = artist_ || '';
-    if (album_ !== undefined) md.album = album_ || '';
+    if (artSrc) setLockArt(artSrc);
+  }
+
+  // Mutate artwork in place (never replace the metadata object); always end with a valid image.
+  function setLockArt(artSrc) {
+    if (!mediaMeta) return;
+    artSrc = sqArt(artSrc);
+    const isPng = /\.png/i.test(artSrc.split('?')[0]);
+    const type = isPng ? 'image/png' : 'image/jpeg';
+    const img = new Image();
+    img.onload = () => {
+      try { mediaMeta.artwork = [{ src: artSrc, sizes: img.naturalWidth + 'x' + img.naturalHeight, type }]; } catch (e) {}
+    };
+    img.onerror = () => {
+      try { mediaMeta.artwork = [{ src: ART_LOGO, sizes: '640x640', type: 'image/png' }]; } catch (e) {}
+    };
+    img.src = artSrc;
   }
 
   function renderBreak() {
