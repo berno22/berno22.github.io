@@ -88,8 +88,7 @@
   const title = document.getElementById('title');
   const status = document.getElementById('status');
   const artEl = document.getElementById('art');
-  let lastMetaSig = '';
-  let lastMetaObj = null;
+  const ART_LOGO = 'art/logo.png';
   const errBox = document.getElementById('err');
   const vis = document.getElementById('vis');
   const ctx = vis.getContext('2d');
@@ -156,11 +155,6 @@
     setStatus('Stuck - reloading\u2026');
     setTimeout(refresh, 600);
   }
-
-  setInterval(() => {
-    if (!started || !lastMetaObj || !navigator.mediaSession) return;
-    try { navigator.mediaSession.metadata = new MediaMetadata(lastMetaObj); } catch (e) {}
-  }, 15000);
 
   let lastTime = -1;
   let stuck = 0;
@@ -366,7 +360,6 @@
   const EPG_URL = 'https://lookaround-cache-prod.streaming.siriusxm.com/playbackservices/v1/live/lookAround';
   const CNBC_GUID = '2b6effb8-eb0e-7421-d7bb-d843a9ff3ce1';
   const LOGO_KEY = 'if/68/68a5fed8ea323a848dd0014bb8c9ddb3_1782186558.png';
-  const ART_LOGO = 'art/logo.png';
   let artMap = {};
   const np = document.getElementById('np');
   const cutEl = document.getElementById('cut');
@@ -389,37 +382,19 @@ function sqArt(u) {
 
 function updateMediaSession(title_, artist_, album_, artSrc) {
     if (!(navigator.mediaSession && window.MediaMetadata)) return;
-    const meta = { title: title_ };
-    if (artist_) meta.artist = artist_;
-    if (album_) meta.album = album_;
-    if (artSrc) {
-      artSrc = sqArt(artSrc);
-      const type = /\.png/i.test(artSrc.split('?')[0]) ? 'image/png' : 'image/jpeg';
-      meta.artwork = [{ src: artSrc, sizes: '', type }];
+    const md = navigator.mediaSession.metadata;
+    if (!md) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: title_,
+        artist: artist_ || '',
+        album: album_ || '',
+        artwork: [{ src: ART_LOGO, sizes: '640x640', type: 'image/png' }]
+      });
+      return;
     }
-    const sig = JSON.stringify(meta);
-    if (sig === lastMetaSig) return;
-    const apply = () => {
-      lastMetaSig = sig;
-      lastMetaObj = meta;
-      navigator.mediaSession.metadata = new MediaMetadata(meta);
-    };
-    if (meta.artwork) {
-      const attempt = (src, isFallback) => {
-        const img = new Image();
-        img.onload = () => {
-          try { meta.artwork[0].sizes = img.naturalWidth + 'x' + img.naturalHeight; } catch (e) {}
-          apply();
-        };
-        img.onerror = () => {
-          if (!isFallback) { meta.artwork[0].src = ART_LOGO; attempt(ART_LOGO, true); }
-        };
-        img.src = src;
-      };
-      attempt(meta.artwork[0].src, false);
-    } else {
-      apply();
-    }
+    md.title = title_ || '';
+    if (artist_ !== undefined) md.artist = artist_ || '';
+    if (album_ !== undefined) md.album = album_ || '';
   }
 
   function renderBreak() {
