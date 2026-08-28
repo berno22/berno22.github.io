@@ -90,6 +90,7 @@
   const artEl = document.getElementById('art');
   const ART_LOGO = 'art/logo.png';
   let mediaMeta = null;
+  let currentLockArt = null;
   const errBox = document.getElementById('err');
   const vis = document.getElementById('vis');
   const ctx = vis.getContext('2d');
@@ -387,11 +388,13 @@ function sqArt(u) {
     const artist = artist_ || '';
     const album = album_ || '';
     if (!mediaMeta) {
+      if (!artSrc) return;
+      const isPng = /\.png/i.test(String(artSrc).split('?')[0]);
       mediaMeta = new MediaMetadata({
         title: title,
         artist: artist,
         album: album,
-        artwork: [{ src: ART_LOGO, sizes: '640x640', type: 'image/png' }]
+        artwork: [{ src: artSrc, sizes: '640x640', type: isPng ? 'image/png' : 'image/jpeg' }]
       });
       navigator.mediaSession.metadata = mediaMeta;
     } else {
@@ -402,7 +405,7 @@ function sqArt(u) {
     if (artSrc) setLockArt(artSrc);
   }
 
-  // Mutate artwork in place (never replace the metadata object); always end with a valid image.
+  // Mutate artwork in place (never replace the metadata object, which blanks Tesla); always end with a valid image.
   function setLockArt(artSrc) {
     if (!mediaMeta) return;
     artSrc = sqArt(artSrc);
@@ -422,7 +425,7 @@ function sqArt(u) {
     cutEl.textContent = 'Advertisement';
     cutEl.classList.add('ad');
     artEl.src = ART_LOGO;
-    updateMediaSession('CNBC - Advertisement', '', '', ART_LOGO);
+    updateMediaSession('CNBC - Advertisement', '', '', currentLockArt || ART_LOGO);
   }
 
   function renderShow(live) {
@@ -456,6 +459,7 @@ function sqArt(u) {
         || (sxmKeys[tN] ? artUrl(sxmKeys[tN], 640) : null)
         || (splashUrl ? sqArt(splashUrl) : null)
         || ART_LOGO);
+    if (!plAd) currentLockArt = lockImg;
     updateMediaSession(
       'CNBC - ' + (plAd ? 'Advertisement' : live.title), '',
       live.displayGenre || '',
