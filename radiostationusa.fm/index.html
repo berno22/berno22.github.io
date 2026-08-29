@@ -358,21 +358,12 @@
   }
 
   const GUIDE_URL = 'https://webql-redesign.cnbcfm.com/graphql';
-  const ART_BASE = 'https://imgsrv-sxm-prod-device.streaming.siriusxm.com/';
-  const EPG_URL = 'https://lookaround-cache-prod.streaming.siriusxm.com/playbackservices/v1/live/lookAround';
-  const CNBC_GUID = '2b6effb8-eb0e-7421-d7bb-d843a9ff3ce1';
-  const LOGO_KEY = 'if/68/68a5fed8ea323a848dd0014bb8c9ddb3_1782186558.png';
   let artMap = {};
   const np = document.getElementById('np');
   const cutEl = document.getElementById('cut');
   const creditsEl = document.getElementById('credits');
   const descEl = document.getElementById('desc');
   const upNextEl = document.getElementById('upnext');
-
-  function artUrl(artKey, size) {
-    const payload = JSON.stringify({ key: artKey, edits: [{ resize: { width: size, height: size } }] });
-    return ART_BASE + btoa(payload);
-  }
 
 function sqArt(u) {
     if (!/image\.cnbcfm\.com/.test(u)) return u;
@@ -435,11 +426,7 @@ function sqArt(u) {
     const localArt = okRaw ? (raw.local || null) : null;
     const splashUrl = (okRaw && raw.url) || null;
     artEl.src = plAd ? ART_LOGO : (splashUrl || ART_LOGO);
-    const lockImg = plAd ? ART_LOGO
-      : (localArt
-        || (sxmKeys[tN] ? artUrl(sxmKeys[tN], 640) : null)
-        || (splashUrl ? sqArt(splashUrl) : null)
-        || ART_LOGO);
+    const lockImg = ART_LOGO;
     updateMediaSession(
       'CNBC - ' + (plAd ? 'Advertisement' : live.title), '',
       live.displayGenre || '',
@@ -478,7 +465,6 @@ function sqArt(u) {
       const g = d.data && d.data.showsSchedule;
       lastComingUp = (g && g.comingUp) || null;
       renderShow(g && g.live);
-      if (started && Date.now() - sxmLast > 900000) { sxmLast = Date.now(); pollSiriusArt(); }
       if (pendingGuide) { pendingGuide = false; fetchGuide(); }
     }).catch(() => { guideBusy = false; });
   }
@@ -488,43 +474,13 @@ function sqArt(u) {
     else pendingGuide = true;
   }
 
-  artEl.onerror = () => artEl.src = artUrl(LOGO_KEY, 320);
+  artEl.onerror = () => artEl.src = ART_LOGO;
 
   window.addEventListener('message', (ev) => {
     const d = ev.data;
     if (!d || d.m !== 'pl') return;
     plBusy = false;
     handlePl(d);
-  });
-
-  function pollSiriusArt() {
-    const js = "fetch('" + EPG_URL + "',{mode:'cors'}).then(r=>r.json()).then(d=>{"
-      + "var ch=d.channels['" + CNBC_GUID + "'];"
-      + "var shows=(ch&&ch.shows)||[];"
-      + "parent.postMessage({m:'sxm',shows:shows.map(function(x){return {n:x.name,k:x.image&&x.image.url};})},'*');"
-      + "}).catch(e=>parent.postMessage({m:'sxm',shows:[]},'*'));";
-    const f = document.createElement('iframe');
-    f.sandbox = 'allow-scripts';
-    f.style.display = 'none';
-    f.srcdoc = '<scr' + 'ipt>' + js + '</scr' + 'ipt>';
-    document.body.appendChild(f);
-    setTimeout(() => f.remove(), 30000);
-  }
-
-  window.addEventListener('message', (ev) => {
-    const d = ev.data;
-    if (!d || d.m !== 'sxm') return;
-    let dirty = false;
-    for (const x of d.shows || []) {
-      if (x.n && x.k) {
-        const k = x.n.toLowerCase().replace(/[^a-z0-9]+/g, '');
-        if (k && sxmKeys[k] !== x.k) { sxmKeys[k] = x.k; dirty = true; }
-      }
-    }
-    if (dirty) {
-      try { localStorage.setItem('sxmArtKeys', JSON.stringify(sxmKeys)); } catch (e) {}
-      if (lastLive) renderShow(lastLive);
-    }
   });
 
   let plBusy = false;
@@ -560,10 +516,6 @@ function sqArt(u) {
   let plEp = null, plAd = false;
 
   let lastLive = null;
-  let sxmKeys = {};
-  try { sxmKeys = JSON.parse(localStorage.getItem('sxmArtKeys') || '{}'); } catch (e) {}
-  fetch('sxm-keys.json').then(r => r.json()).then(k => { for (const a in k) if (!sxmKeys[a]) sxmKeys[a] = k[a]; }).catch(() => {});
-  let sxmLast = 0;
   function handlePl(d) {
     window.__plg = window.__plg || { n: 0 };
     window.__plg.n++;
