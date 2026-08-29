@@ -89,8 +89,8 @@
   const status = document.getElementById('status');
   const artEl = document.getElementById('art');
   const ART_LOGO = 'art/logo.png';
+  const LOGO_SIZE = '1024x1024';
   let mediaMeta = null;
-  let currentLockArt = null;
   const errBox = document.getElementById('err');
   const vis = document.getElementById('vis');
   const ctx = vis.getContext('2d');
@@ -388,13 +388,11 @@ function sqArt(u) {
     const artist = artist_ || '';
     const album = album_ || '';
     if (!mediaMeta) {
-      if (!artSrc) return;
-      const isPng = /\.png/i.test(String(artSrc).split('?')[0]);
       mediaMeta = new MediaMetadata({
         title: title,
         artist: artist,
         album: album,
-        artwork: [{ src: artSrc, sizes: '640x640', type: isPng ? 'image/png' : 'image/jpeg' }]
+        artwork: [{ src: ART_LOGO, sizes: LOGO_SIZE, type: 'image/png' }]
       });
       navigator.mediaSession.metadata = mediaMeta;
     } else {
@@ -402,30 +400,13 @@ function sqArt(u) {
       mediaMeta.artist = artist;
       mediaMeta.album = album;
     }
-    if (artSrc) setLockArt(artSrc);
-  }
-
-  // Mutate artwork in place (never replace the metadata object, which blanks Tesla); always end with a valid image.
-  function setLockArt(artSrc) {
-    if (!mediaMeta) return;
-    artSrc = sqArt(artSrc);
-    const isPng = /\.png/i.test(artSrc.split('?')[0]);
-    const type = isPng ? 'image/png' : 'image/jpeg';
-    const img = new Image();
-    img.onload = () => {
-      try { mediaMeta.artwork = [{ src: artSrc, sizes: img.naturalWidth + 'x' + img.naturalHeight, type }]; } catch (e) {}
-    };
-    img.onerror = () => {
-      try { mediaMeta.artwork = [{ src: ART_LOGO, sizes: '640x640', type: 'image/png' }]; } catch (e) {}
-    };
-    img.src = artSrc;
   }
 
   function renderBreak() {
     cutEl.textContent = 'Advertisement';
     cutEl.classList.add('ad');
     artEl.src = ART_LOGO;
-    updateMediaSession('CNBC - Advertisement', '', '', currentLockArt || ART_LOGO);
+    updateMediaSession('CNBC - Advertisement', '', '', ART_LOGO);
   }
 
   function renderShow(live) {
@@ -459,11 +440,10 @@ function sqArt(u) {
         || (sxmKeys[tN] ? artUrl(sxmKeys[tN], 640) : null)
         || (splashUrl ? sqArt(splashUrl) : null)
         || ART_LOGO);
-    if (!plAd) currentLockArt = lockImg;
     updateMediaSession(
       'CNBC - ' + (plAd ? 'Advertisement' : live.title), '',
       live.displayGenre || '',
-      lockImg
+      ART_LOGO
     );
     np.classList.add('on');
   }
