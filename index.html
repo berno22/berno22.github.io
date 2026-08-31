@@ -5,15 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>berno22</title>
     <style>
+      :root {
+        --bg: #e8e8e8;
+        --surface: #ffffff;
+        --text: #1a1a1a;
+        --muted: #777777;
+        --line: #d0d0d0;
+        --accent: #e82127;
+      }
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body {
         min-height: 100vh;
-        background:
-          radial-gradient(ellipse 70% 45% at 15% -10%, rgba(79, 110, 247, 0.10), transparent),
-          radial-gradient(ellipse 70% 45% at 85% 110%, rgba(110, 130, 170, 0.07), transparent),
-          linear-gradient(160deg, #17181c 0%, #121316 55%, #0d0e11 100%);
-        color: #e6e8ee;
+        background: var(--bg);
+        color: var(--text);
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+        font-weight: 300;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -22,25 +28,23 @@
       .links {
         display: flex;
         flex-direction: column;
-        gap: 14px;
+        gap: 12px;
         width: min(440px, 90vw);
       }
       a {
         position: relative;
         display: block;
         text-decoration: none;
-        color: #d7dae2;
-        background: rgba(30, 32, 38, 0.82);
-        -webkit-backdrop-filter: blur(10px);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        background: var(--surface);
+        border: 1px solid var(--line);
         border-radius: 14px;
         padding: 17px 44px 17px 20px;
         font-size: 17px;
-        font-weight: 600;
+        font-weight: 400;
+        letter-spacing: 0.04em;
         text-align: center;
-        letter-spacing: 0.01em;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 14px rgba(0, 0, 0, 0.3);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
         transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s,
                     color 0.25s, background 0.25s;
       }
@@ -50,16 +54,15 @@
         right: 18px;
         top: 50%;
         transform: translateY(-50%) translateX(-6px);
-        color: #6b85ff;
+        color: var(--accent);
         opacity: 0;
         transition: transform 0.25s, opacity 0.25s;
       }
       a:hover {
-        border-color: rgba(107, 133, 255, 0.5);
-        color: #fff;
-        background: rgba(38, 41, 48, 0.95);
+        border-color: var(--accent);
+        background: #f5f5f5;
         transform: translateY(-2px);
-        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
       }
       a:hover::after {
         opacity: 1;
@@ -69,7 +72,7 @@
         transform: translateY(0) scale(0.98);
       }
       a:focus-visible {
-        outline: 2px solid #4F6EF7;
+        outline: 2px solid var(--accent);
         outline-offset: 3px;
       }
       @media (max-width: 480px) {
