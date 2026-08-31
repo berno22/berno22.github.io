@@ -111,8 +111,10 @@
   let tgt = new Float32Array(N);
   function rebuildBars() {
     N = Math.min(140, Math.max(36, Math.round(VW / 24)));
-    GAP = VW > 1600 ? 8 : VW > 1000 ? 6 : 4;
-    BW = (VW - (N - 1) * GAP) / N;
+    GAP = VW > 1600 ? 8 : VW > 1000 ? 6 : 3;
+    const halfW = VW / 2;
+    if ((N - 1) * GAP >= halfW) GAP = Math.max(1, Math.round(halfW * 0.12 / N));
+    BW = (halfW - (N - 1) * GAP) / N;
     levels = new Float32Array(N);
     vel = new Float32Array(N);
     tgt = new Float32Array(N);
@@ -263,7 +265,6 @@
       vel[i] *= 0.78;
       levels[i] += vel[i];
       const h = Math.max(2, levels[i] * (midY - 10));
-      const x = i * (BW + GAP);
       const y = midY - h / 2;
       const grad = ctx.createLinearGradient(0, midY - h, 0, midY + h);
       grad.addColorStop(0, '#d8d8d8');
@@ -272,10 +273,14 @@
       ctx.fillStyle = grad;
       ctx.shadowBlur = 6;
       ctx.shadowColor = 'rgba(0,0,0,0.12)';
-      drawBar(x, y, BW, h);
+      const xL = i * (BW + GAP);
+      const xR = VW - xL - BW;
+      drawBar(xL, y, BW, h);
+      drawBar(xR, y, BW, h);
       ctx.fillStyle = 'rgba(90,90,90,0.25)';
       ctx.shadowBlur = 0;
-      ctx.fillRect(x, y, BW, 2);
+      ctx.fillRect(xL, y, BW, 2);
+      ctx.fillRect(xR, y, BW, 2);
     }
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
