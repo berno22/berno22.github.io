@@ -73,8 +73,7 @@
 <div id="wrap">
   <div id="brand" role="img" aria-label="CNBC"></div>
   <div id="card">
-    <p id="status" style="display:block">Loading&hellip;</p>
-    <p id="dbg" style="display:block;margin:4px auto 0;color:#a00;font-size:13px;font-weight:600"></p>
+    <p id="status">Loading&hellip;</p>
     <div id="np">
       <img id="art" alt="">
     </div>
@@ -143,17 +142,6 @@
   }
   sizeCanvas();
   window.addEventListener('resize', sizeCanvas);
-
-  const dbgEl = document.getElementById('dbg');
-  function updateDbg() {
-    if (!dbgEl) return;
-    const z = parseFloat(getComputedStyle(document.getElementById('card')).zoom) || 1;
-    dbgEl.textContent = 'innerW=' + window.innerWidth + ' innerH=' + window.innerHeight
-      + ' dpr=' + (window.devicePixelRatio || 1)
-      + ' zoom=' + z + ' mq=' + (window.matchMedia('(max-width: 430px)').matches ? 'mobile' : 'desktop');
-  }
-  updateDbg();
-  window.addEventListener('resize', updateDbg);
 
   function refresh() { location.reload(); }
 
