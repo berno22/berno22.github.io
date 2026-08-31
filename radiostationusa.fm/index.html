@@ -147,7 +147,8 @@
   function updateDbg() {
     if (!dbgEl) return;
     const z = parseFloat(getComputedStyle(document.getElementById('card')).zoom) || 1;
-    dbgEl.textContent = 'innerW=' + window.innerWidth + ' dpr=' + (window.devicePixelRatio || 1)
+    dbgEl.textContent = 'innerW=' + window.innerWidth + ' innerH=' + window.innerHeight
+      + ' dpr=' + (window.devicePixelRatio || 1)
       + ' zoom=' + z + ' mq=' + (window.matchMedia('(max-width: 430px)').matches ? 'mobile' : 'desktop');
   }
   updateDbg();
