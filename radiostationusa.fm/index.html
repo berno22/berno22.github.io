@@ -339,7 +339,7 @@
     });
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       setLive();
-      setStatus('Click to play');
+      setStatus('');
     });
     hls.loadSource(src);
     hls.attachMedia(video);
@@ -353,7 +353,7 @@
         video.removeEventListener('loadedmetadata', onMeta);
         video.removeEventListener('error', onErr);
         setLive();
-        setStatus('Click to play');
+        setStatus('');
       };
       const onErr = () => {
         video.removeEventListener('loadedmetadata', onMeta);
