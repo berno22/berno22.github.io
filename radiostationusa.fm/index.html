@@ -166,14 +166,19 @@
 
   let lastTime = -1;
   let stuck = 0;
+  let establishedAt = 0;
   setInterval(() => {
-    if (!started || video.paused || video.ended) { stuck = 0; lastTime = video.currentTime; return; }
-    if (video.currentTime === lastTime) {
-      stuck++;
-      if (stuck >= 2) { stuck = 0; autoReload(); }
+    const t = video.currentTime;
+    if (!started || video.paused || video.ended) { stuck = 0; lastTime = t; return; }
+    if (t === lastTime) {
+      if (establishedAt && performance.now() - establishedAt > 6000) {
+        stuck++;
+        if (stuck >= 6) { stuck = 0; video.play().catch(() => {}); autoReload(); }
+      }
     } else {
       stuck = 0;
-      lastTime = video.currentTime;
+      lastTime = t;
+      if (!establishedAt) establishedAt = performance.now();
     }
   }, 500);
 
@@ -296,15 +301,32 @@
     raf = 0;
   }
 
+  let playTries = 0;
+  function playWithRetry() {
+    if (!started) return;
+    if (video.paused === false) { playTries = 0; return; }
+    video.play().then(() => {
+      playTries = 0;
+      setStatus('Live'); startVis(); wireAnalyser();
+      sessionStorage.setItem('cnbcAutoReload', '0');
+    }).catch(() => {
+      playTries++;
+      if (playTries < 15) {
+        setTimeout(() => { if (started && video.paused) playWithRetry(); }, 800);
+      } else {
+        started = false;
+        setStatus('Tap to play again');
+      }
+    });
+  }
+
   function togglePlay() {
     if (!started) {
       started = true;
       ensureCtx();
       video.muted = false;
-      video.play()
-        .then(() => { setStatus('Live'); startVis(); wireAnalyser(); sessionStorage.setItem('cnbcAutoReload', '0'); })
-        .catch(() => { started = false; setStatus('Tap again'); stopVis(); });
-    } else {
+      playWithRetry();
+    } else if (video.paused === false) {
       refresh();
     }
   }
