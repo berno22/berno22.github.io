@@ -326,8 +326,17 @@
       ensureCtx();
       video.muted = false;
       playWithRetry();
+    } else if (video.paused === false && video.muted) {
+      video.muted = false;
+      ensureCtx();
+      setStatus('Live');
     } else if (video.paused === false) {
+      sessionStorage.setItem('cnbcClickReload', '1');
       refresh();
+    } else if (video.muted === false) {
+      started = true;
+      ensureCtx();
+      playWithRetry();
     }
   }
   title.addEventListener('click', togglePlay);
@@ -340,6 +349,24 @@
     } catch (e) {}
   }
   updateMediaSession('CNBC Audio');
+
+  function tryAutoplay() {
+    if (video.paused === false) { started = true; startVis(); wireAnalyser(); return; }
+    started = true;
+    const unmuted = sessionStorage.getItem('cnbcClickReload') === '1';
+    sessionStorage.removeItem('cnbcClickReload');
+    video.muted = !unmuted;
+    video.play().then(() => {
+      setStatus(unmuted ? 'Live' : 'Muted - tap to unmute');
+      startVis();
+      wireAnalyser();
+      sessionStorage.setItem('cnbcAutoReload', '0');
+    }).catch(() => {
+      started = false;
+      video.muted = true;
+      setStatus('Click to play');
+    });
+  }
 
   function startHls(waited) {
     if (!window.Hls) {
@@ -354,7 +381,7 @@
     });
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       setLive();
-      setStatus('');
+      tryAutoplay();
     });
     hls.loadSource(src);
     hls.attachMedia(video);
@@ -368,7 +395,7 @@
         video.removeEventListener('loadedmetadata', onMeta);
         video.removeEventListener('error', onErr);
         setLive();
-        setStatus('');
+        tryAutoplay();
       };
       const onErr = () => {
         video.removeEventListener('loadedmetadata', onMeta);
