@@ -185,10 +185,9 @@
   let audioCtx = null, analyser = null, dataArray = null;
 
   function ensureCtx() {
+    if (audioCtx) return;
     try {
-      if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      }
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       if (audioCtx.state === 'suspended') audioCtx.resume();
     } catch (e) {
       audioCtx = null;
@@ -199,23 +198,18 @@
   function wireAnalyser() {
     if (analyser || !audioCtx || !started) return;
     try {
-      if (audioCtx.state === 'suspended') audioCtx.resume();
       let srcNode = null;
-      try {
-        srcNode = audioCtx.createMediaElementSource(video);
-      } catch (e) {
-        srcNode = null;
-      }
-      if (!srcNode && video.captureStream) {
+      if (video.captureStream) {
         const stream = video.captureStream();
-        if (stream.getAudioTracks().length) {
+        if (!stream.getAudioTracks().length) {
           if (wireTries++ < 12) setTimeout(wireAnalyser, 300);
-          else { wireTries = 0; srcNode = audioCtx.createMediaStreamSource(stream); }
+          return;
         }
+        srcNode = audioCtx.createMediaStreamSource(stream);
+      } else {
+        srcNode = audioCtx.createMediaElementSource(video);
+        srcNode.connect(audioCtx.destination);
       }
-      if (!srcNode) return;
-      video.muted = false;
-      srcNode.connect(audioCtx.destination);
       analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.82;
