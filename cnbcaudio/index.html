@@ -246,7 +246,7 @@
     if (analyser && dataArray) {
       analyser.getByteFrequencyData(dataArray);
       for (let i = 0; i < dataArray.length; i++) alive += dataArray[i];
-      if (alive > 2000) synthetic = false;
+      if (alive > 0) synthetic = false;
       if (alive === 0) {
         if (!synthStart) synthStart = performance.now();
         else if (performance.now() - synthStart > 700) synthetic = true;
@@ -307,7 +307,9 @@
     if (video.paused === false) { playTries = 0; return; }
     video.play().then(() => {
       playTries = 0;
-      setStatus('Live'); startVis(); wireAnalyser();
+      setStatus('Live'); startVis();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => wireAnalyser());
+      else wireAnalyser();
       sessionStorage.setItem('cnbcAutoReload', '0');
     }).catch(() => {
       playTries++;
@@ -359,7 +361,8 @@
     video.play().then(() => {
       setStatus(unmuted ? 'Live' : 'Muted - tap to unmute');
       startVis();
-      wireAnalyser();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => wireAnalyser());
+      else wireAnalyser();
       sessionStorage.setItem('cnbcAutoReload', '0');
     }).catch(() => {
       started = false;
