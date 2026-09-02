@@ -353,7 +353,12 @@
   updateMediaSession('CNBC Audio');
 
   function tryAutoplay() {
-    if (video.paused === false) { started = true; startVis(); wireAnalyser(); return; }
+    if (video.paused === false) {
+      started = true; startVis();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => wireAnalyser());
+      else wireAnalyser();
+      return;
+    }
     started = true;
     const unmuted = sessionStorage.getItem('cnbcClickReload') === '1';
     sessionStorage.removeItem('cnbcClickReload');
