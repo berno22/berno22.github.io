@@ -102,8 +102,62 @@
   let PERIOD = 96, baseAmp = 40;
   let midY = 75, hist = null, pen = 0, period = PERIOD, amp = baseAmp;
   let raf = 0;
-  const src = 'https://cnbc.mt.linear.viewlift.com/v1/manifest/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/af693a58-c312-448e-bd89-aa9eba697ad0/7.m3u8';
+  // Stream URL is never embedded (tokens expire). It is derived on every load:
+  // cnbc.html (same origin) -> stable master playlist URL -> master playlist
+  // -> current TYPE=AUDIO manifest URL (token included). No stale fallback:
+  // if resolution fails, the failure is shown loudly and retried, never
+  // silently played from a dead URL.
+  const MASTER_FALLBACK = 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
+  let src = null;
   let started = false;
+  let resolving = false, resolveTimer = 0;
+
+  function fetchText(url, ms) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), ms || 10000);
+    return fetch(url, { cache: 'no-store', signal: ctl.signal }).then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    }).finally(() => clearTimeout(t));
+  }
+
+  async function resolveStreamUrl() {
+    const bust = u => u + (u.indexOf('?') < 0 ? '?' : '&') + 'ts=' + Date.now();
+    let master = MASTER_FALLBACK;
+    try {
+      const html = await fetchText(bust('../cnbc.html'));
+      const m = html.match(/https:\/\/cnbc\.mt\.linear\.viewlift\.com\/v1\/master\/[A-Za-z0-9_.\-\/]+?\.m3u8/);
+      if (!m) throw new Error('master URL not found in cnbc.html');
+      master = m[0];
+    } catch (e) {
+      master = MASTER_FALLBACK; // tokenless + stable, safe to keep hardcoded
+    }
+    const pl = await fetchText(bust(master));
+    const media = pl.match(/EXT-X-MEDIA:[^\n]*TYPE=AUDIO[^\n]*/);
+    const a = media && media[0].match(/URI="([^"]*\/7\.m3u8)"/);
+    if (!a) throw new Error('audio entry not found in master playlist');
+    return new URL(a[1], master).href; // RFC-resolve the ../../.. URI, same as hls.js does
+  }
+
+  function boot(fromTap) {
+    if (resolving) return;
+    resolving = true;
+    clearTimeout(resolveTimer);
+    resolveStreamUrl().then(url => {
+      resolving = false;
+      src = url;
+      errBox.textContent = '';
+      started = true;
+      ensureCtx();
+      attach(fromTap);
+    }).catch(e => {
+      resolving = false;
+      started = false;
+      setError('Could not resolve stream (' + ((e && e.message) || e) + ') - retrying. Tap "CNBC Audio" to retry now.');
+      clearTimeout(resolveTimer);
+      resolveTimer = setTimeout(() => boot(false), 15000);
+    });
+  }
 
   let N = 52, BW = 6, GAP = 3;
   let levels = new Float32Array(N);
@@ -324,10 +378,8 @@
 
   function togglePlay() {
     if (!started) {
-      started = true;
       ensureCtx();
-      video.muted = false;
-      playWithRetry();
+      boot(true);
     } else if (video.paused === false && video.muted) {
       video.muted = false;
       ensureCtx();
@@ -376,9 +428,14 @@
     });
   }
 
-  function startHls(waited) {
+  function playUnmuted() {
+    video.muted = false;
+    playWithRetry();
+  }
+
+  function startHls(waited, fromTap) {
     if (!window.Hls) {
-      if ((waited || 0) < 40) setTimeout(() => startHls((waited || 0) + 1), 250);
+      if ((waited || 0) < 40) setTimeout(() => startHls((waited || 0) + 1, fromTap), 250);
       else setError('HLS is not supported in this browser');
       return;
     }
@@ -389,13 +446,13 @@
     });
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       setLive();
-      tryAutoplay();
+      if (fromTap) playUnmuted(); else tryAutoplay();
     });
     hls.loadSource(src);
     hls.attachMedia(video);
   }
 
-  function start() {
+  function attach(fromTap) {
     const native = !!(video.canPlayType && video.canPlayType('application/vnd.apple.mpegurl') !== '');
     if (native) {
       video.src = src;
@@ -403,24 +460,24 @@
         video.removeEventListener('loadedmetadata', onMeta);
         video.removeEventListener('error', onErr);
         setLive();
-        tryAutoplay();
+        if (fromTap) playUnmuted(); else tryAutoplay();
       };
       const onErr = () => {
         video.removeEventListener('loadedmetadata', onMeta);
         video.removeEventListener('error', onErr);
-        startHls();
+        startHls(0, fromTap);
       };
       video.addEventListener('loadedmetadata', onMeta);
       video.addEventListener('error', onErr);
     } else {
-      startHls();
+      startHls(0, fromTap);
     }
   }
 
   if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    start();
+    boot(false);
   } else {
-    window.addEventListener('DOMContentLoaded', start);
+    window.addEventListener('DOMContentLoaded', () => boot(false));
   }
 
   const GUIDE_URL = 'https://webql-redesign.cnbcfm.com/graphql';
