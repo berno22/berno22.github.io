@@ -23,8 +23,9 @@ h2{margin:0;font-weight:bold;color:#8e8e93;font-size:13px;letter-spacing:3px;tex
 #glow{transition:opacity .9s linear}
 #meta{margin:0}
 #metapill{display:inline-block;background:#f0f0f2;color:#3a3a3c;font-size:14px;font-weight:bold;padding:7px 16px;border-radius:999px}
-/* Tesla in-car browser (viewport ~700-840px): scale page to fit */
-@media(min-width:700px) and (max-width:840px){html{zoom:0.60}}
+/* Tesla in-car browser (viewport ~700-840px): scale page to fit and
+   give the card the same ~56px visual gap as desktop (94px x 0.60) */
+@media(min-width:700px) and (max-width:840px){html{zoom:0.60}body{padding-top:94px}}
 /* Desktop: breathing room above the card (it hugged the top edge) */
 @media(min-width:841px){body{padding-top:56px}}
 </style></head><body>
