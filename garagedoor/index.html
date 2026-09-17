@@ -20,7 +20,7 @@ svg{max-width:520px;width:94vw;height:auto}
 #meta{margin:0}
 #metapill{display:inline-block;background:#f0f0f2;color:#3a3a3c;font-size:14px;font-weight:bold;padding:7px 16px;border-radius:999px}
 </style></head><body>
-<div id="lock" style="display:block;position:fixed;left:0;top:0;right:0;bottom:0;background:#f4f4f5;z-index:50;padding-top:70px">
+<div id="lock" style="display:none;position:fixed;left:0;top:0;right:0;bottom:0;background:#f4f4f5;z-index:50;padding-top:70px">
 <h2>Garage Door</h2>
 <input id="code" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="one-time-code" style="font-size:34px;text-align:center;letter-spacing:12px;width:220px;padding:12px;border:2px solid #9aa0a8;border-radius:12px;margin:14px 0">
 <br><button id="unlockBtn" type="button" style="font-size:22px;font-weight:bold;padding:14px 44px;border:none;border-radius:12px;background:#1565c0;color:#fff">UNLOCK</button>
@@ -28,8 +28,8 @@ svg{max-width:520px;width:94vw;height:auto}
 </div>
 <div id="card">
 <h2>Garage Door</h2>
-<div id="s" class="open">OPEN</div>
-<div id="meta"><span id="metapill">0% &middot; updated 10m ago</span></div>
+<div id="s" class="unknown">&middot;&middot;&middot;</div>
+<div id="meta"><span id="metapill">loading&hellip;</span></div>
 </div>
 <svg viewBox="0 0 360 250" role="img" aria-label="garage door" style="margin-top:14px">
 <defs><clipPath id="op"><rect x="60" y="46" width="240" height="174"/></clipPath>
@@ -46,13 +46,13 @@ svg{max-width:520px;width:94vw;height:auto}
 <rect x="0" y="0" width="360" height="250" fill="#f4f4f5"/>
 <rect x="40" y="26" width="280" height="214" rx="16" fill="#d7dbe0"/>
 <rect x="60" y="46" width="240" height="174" fill="url(#inner)"/>
-<ellipse id="glow" cx="180" cy="196" rx="115" ry="42" fill="url(#warm)" opacity="0.8"/>
+<ellipse id="glow" cx="180" cy="196" rx="115" ry="42" fill="url(#warm)" opacity="0.0"/>
 <rect x="60" y="200" width="240" height="20" fill="#33373c"/>
-<g id="car" opacity="1.0">
+<g id="car" opacity="0">
 <image href="https://96.244.150.95.sslip.io:8443/beetle3.png" x="117" y="82" width="125" height="128"/>
 </g>
 <rect x="60" y="46" width="240" height="174" fill="none" stroke="#b9bec5" stroke-width="2"/>
-<g id="door" clip-path="url(#op)" style="transform:translateY(-174.0px)">
+<g id="door" clip-path="url(#op)" style="transform:translateY(0px)">
 <rect x="62" y="48" width="236" height="32" rx="2" fill="url(#panel)"/>
 <rect x="72" y="52" width="216" height="24" rx="3" fill="#20242a"/>
 <rect x="76" y="55" width="208" height="18" rx="2" fill="#b9c6cf" opacity=".9"/>
@@ -66,7 +66,7 @@ svg{max-width:520px;width:94vw;height:auto}
 </svg>
 <div id="btns">
 <button id="btnOpen" type="button" style="display:none">OPEN DOOR</button>
-<button id="btnClose" type="button" style="display:inline-block">CLOSE DOOR</button>
+<button id="btnClose" type="button" style="display:none">CLOSE DOOR</button>
 </div>
 <div id="msg"></div>
 <script>
