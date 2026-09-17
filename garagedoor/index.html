@@ -4,9 +4,10 @@
 <meta http-equiv="refresh" content="60">
 <title>Garage Door</title>
 <style>
-body{font-family:sans-serif;text-align:center;background:#f4f4f5;color:#171a20;margin:0;padding:16px}
-h2{margin:8px 0 4px;font-weight:bold;color:#5c5e62;font-size:20px}
-#s{font-size:52px;font-weight:bold;margin:6px 0 10px}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,Roboto,"Helvetica Neue",Arial,sans-serif;text-align:center;background:#f4f4f5;color:#171a20;margin:0;padding:16px;-webkit-font-smoothing:antialiased}
+#card{background:#fff;border-radius:20px;box-shadow:0 2px 12px rgba(0,0,0,.08);padding:18px 16px 14px;margin:0 auto;max-width:520px}
+h2{margin:0;font-weight:bold;color:#8e8e93;font-size:13px;letter-spacing:3px;text-transform:uppercase}
+#s{font-size:56px;font-weight:bold;letter-spacing:-1px;margin:2px 0 10px}
 .open{color:#f44336}.closed{color:#4caf50}.moving{color:#ff9800}.unknown{color:#9e9e9e}
 #btns{margin-top:14px}
 #btns button{font-size:24px;font-weight:bold;padding:16px 34px;margin:6px;border:none;border-radius:12px;color:#fff}
@@ -15,7 +16,9 @@ h2{margin:8px 0 4px;font-weight:bold;color:#5c5e62;font-size:20px}
 svg{max-width:520px;width:94vw;height:auto}
 #door{transition:transform .9s linear}
 #car{transition:opacity .9s linear}
-#meta{color:#71767c;margin-top:10px;font-size:14px;font-weight:bold}
+#glow{transition:opacity .9s linear}
+#meta{margin:0}
+#metapill{display:inline-block;background:#f0f0f2;color:#3a3a3c;font-size:14px;font-weight:bold;padding:7px 16px;border-radius:999px}
 </style></head><body>
 <div id="lock" style="display:block;position:fixed;left:0;top:0;right:0;bottom:0;background:#f4f4f5;z-index:50;padding-top:70px">
 <h2>Garage Door</h2>
@@ -23,34 +26,47 @@ svg{max-width:520px;width:94vw;height:auto}
 <br><button id="unlockBtn" type="button" style="font-size:22px;font-weight:bold;padding:14px 44px;border:none;border-radius:12px;background:#1565c0;color:#fff">UNLOCK</button>
 <div id="lockerr" style="color:#c62828;font-weight:bold;min-height:26px;margin-top:10px"></div>
 </div>
+<div id="card">
 <h2>Garage Door</h2>
-<div id="s" class="closed">CLOSED</div>
-<div id="meta">100% &middot; updated 14s ago</div>
-<svg viewBox="0 0 360 250" role="img" aria-label="garage door">
-<defs><clipPath id="op"><rect x="60" y="46" width="240" height="174"/></clipPath></defs>
+<div id="s" class="open">OPEN</div>
+<div id="meta"><span id="metapill">0% &middot; updated 10m ago</span></div>
+</div>
+<svg viewBox="0 0 360 250" role="img" aria-label="garage door" style="margin-top:14px">
+<defs><clipPath id="op"><rect x="60" y="46" width="240" height="174"/></clipPath>
+<linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#a7adb5"/><stop offset=".5" stop-color="#8f959d"/><stop offset="1" stop-color="#767c84"/>
+</linearGradient>
+<linearGradient id="inner" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#2b2f34"/><stop offset="1" stop-color="#43484e"/>
+</linearGradient>
+<radialGradient id="warm" cx=".5" cy=".5" r=".5">
+<stop offset="0" stop-color="#ffdf9e" stop-opacity=".5"/><stop offset="1" stop-color="#ffdf9e" stop-opacity="0"/>
+</radialGradient>
+</defs>
 <rect x="0" y="0" width="360" height="250" fill="#f4f4f5"/>
-<rect x="40" y="14" width="280" height="14" rx="3" fill="#d7dbe0"/>
-<rect x="40" y="14" width="8" height="222" fill="#d7dbe0"/>
-<rect x="312" y="14" width="8" height="222" fill="#d7dbe0"/>
-<rect x="40" y="228" width="280" height="8" fill="#d7dbe0"/>
-<rect x="60" y="46" width="240" height="174" fill="#050505"/>
-<rect x="60" y="200" width="240" height="20" fill="#141414"/>
-<g id="car" opacity="0">
+<rect x="40" y="26" width="280" height="214" rx="16" fill="#d7dbe0"/>
+<rect x="60" y="46" width="240" height="174" fill="url(#inner)"/>
+<ellipse id="glow" cx="180" cy="196" rx="115" ry="42" fill="url(#warm)" opacity="0.8"/>
+<rect x="60" y="200" width="240" height="20" fill="#33373c"/>
+<g id="car" opacity="1.0">
 <image href="https://96.244.150.95.sslip.io:8443/beetle3.png" x="117" y="82" width="125" height="128"/>
 </g>
-<rect x="60" y="46" width="240" height="174" fill="none" stroke="#9aa0a8" stroke-width="3"/>
-<g id="door" clip-path="url(#op)" style="transform:translateY(0px)">
-<rect x="62" y="48" width="236" height="32" rx="2" fill="#8a9199"/>
-<rect x="62" y="82" width="236" height="32" rx="2" fill="#7e858d"/>
-<rect x="62" y="116" width="236" height="32" rx="2" fill="#8a9199"/>
-<rect x="62" y="150" width="236" height="32" rx="2" fill="#7e858d"/>
-<rect x="62" y="184" width="236" height="32" rx="2" fill="#8a9199"/>
-<rect x="150" y="126" width="60" height="8" rx="4" fill="#4a4f55"/>
+<rect x="60" y="46" width="240" height="174" fill="none" stroke="#b9bec5" stroke-width="2"/>
+<g id="door" clip-path="url(#op)" style="transform:translateY(-174.0px)">
+<rect x="62" y="48" width="236" height="32" rx="2" fill="url(#panel)"/>
+<rect x="72" y="52" width="216" height="24" rx="3" fill="#20242a"/>
+<rect x="76" y="55" width="208" height="18" rx="2" fill="#b9c6cf" opacity=".9"/>
+<rect x="143" y="55" width="4" height="18" fill="#20242a"/>
+<rect x="213" y="55" width="4" height="18" fill="#20242a"/>
+<rect x="62" y="82" width="236" height="32" rx="2" fill="url(#panel)"/>
+<rect x="62" y="116" width="236" height="32" rx="2" fill="url(#panel)"/>
+<rect x="62" y="150" width="236" height="32" rx="2" fill="url(#panel)"/>
+<rect x="62" y="184" width="236" height="32" rx="2" fill="url(#panel)"/>
 </g>
 </svg>
 <div id="btns">
-<button id="btnOpen" type="button" style="display:inline-block">OPEN DOOR</button>
-<button id="btnClose" type="button" style="display:none">CLOSE DOOR</button>
+<button id="btnOpen" type="button" style="display:none">OPEN DOOR</button>
+<button id="btnClose" type="button" style="display:inline-block">CLOSE DOOR</button>
 </div>
 <div id="msg"></div>
 <script>
@@ -75,11 +91,12 @@ async function r(){try{const a=await fetch(API+"/state",{cache:"no-store",creden
 const open=j.position||0;
 document.getElementById("door").style.transform="translateY("+(-open*DY)+"px)";
 document.getElementById("car").style.opacity=open;
+document.getElementById("glow").style.opacity=open*0.8;
 const el=document.getElementById("s");el.textContent=j.status;
 el.className=j.ok?(j.status==="OPEN"?"open":j.status==="CLOSED"?"closed":"moving"):"unknown";
 const pct=Math.round((1-(j.position||0))*100);
 function ageStr(s){s=Math.floor(s);if(s<60)return s+"s ago";const m=Math.floor(s/60);if(m<60)return m+"m ago";const h=Math.floor(m/60);if(h<24)return h+"h ago";const d=Math.floor(h/24);if(d<7)return d+"d ago";return Math.floor(d/7)+"w ago";}
-document.getElementById("meta").innerHTML=j.ok?(pct+"% &middot; updated "+ageStr(j.age_s)):"ratgdo unreachable &mdash; showing nothing stale";
+document.getElementById("metapill").innerHTML=j.ok?(pct+"% &middot; updated "+ageStr(j.age_s)):"ratgdo unreachable";
 const showOpen=j.ok&&j.status==="CLOSED";
 document.getElementById("btnOpen").style.display=showOpen?"":"none";
 document.getElementById("btnClose").style.display=(j.ok&&!showOpen)?"":"none";
