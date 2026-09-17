@@ -84,7 +84,7 @@ const code=document.getElementById("code").value;
 const e=document.getElementById("lockerr");
 try{const a=await fetch(API+"/unlock",{method:"POST",credentials:"include",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"code="+encodeURIComponent(code)});
 if(a.ok){document.getElementById("lock").style.display="none";boot();}
-else if(a.status===429){e.textContent="too many tries — wait 30s";}
+else if(a.status===429){e.textContent="too many tries — wait 10m";}
 else{e.textContent="wrong code";}}
 catch(err){e.textContent="failed: no response";}}
 async function r(){try{const a=await fetch(API+"/state",{cache:"no-store",credentials:"include"});const j=await a.json();
