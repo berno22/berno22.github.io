@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="60">
+<title>Garage Door</title>
+<style>
+body{font-family:sans-serif;text-align:center;background:#f4f4f5;color:#171a20;margin:0;padding:16px}
+h2{margin:8px 0 4px;font-weight:bold;color:#5c5e62;font-size:20px}
+#s{font-size:52px;font-weight:bold;margin:6px 0 10px}
+.open{color:#f44336}.closed{color:#4caf50}.moving{color:#ff9800}.unknown{color:#9e9e9e}
+#btns{margin-top:14px}
+#btns button{font-size:24px;font-weight:bold;padding:16px 34px;margin:6px;border:none;border-radius:12px;color:#fff}
+#btnOpen{background:#c62828}#btnClose{background:#2e7d32}
+#msg{min-height:22px;color:#ffb74d;margin-top:8px;font-size:15px}
+svg{max-width:520px;width:94vw;height:auto}
+#door{transition:transform .9s linear}
+#car{transition:opacity .9s linear}
+#meta{color:#71767c;margin-top:10px;font-size:14px;font-weight:bold}
+</style></head><body>
+<div id="lock" style="display:block;position:fixed;left:0;top:0;right:0;bottom:0;background:#f4f4f5;z-index:50;padding-top:70px">
+<h2>Garage Door</h2>
+<input id="code" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="one-time-code" style="font-size:34px;text-align:center;letter-spacing:12px;width:220px;padding:12px;border:2px solid #9aa0a8;border-radius:12px;margin:14px 0">
+<br><button id="unlockBtn" type="button" style="font-size:22px;font-weight:bold;padding:14px 44px;border:none;border-radius:12px;background:#1565c0;color:#fff">UNLOCK</button>
+<div id="lockerr" style="color:#c62828;font-weight:bold;min-height:26px;margin-top:10px"></div>
+</div>
+<h2>Garage Door</h2>
+<div id="s" class="closed">CLOSED</div>
+<div id="meta">100% &middot; updated 14s ago</div>
+<svg viewBox="0 0 360 250" role="img" aria-label="garage door">
+<defs><clipPath id="op"><rect x="60" y="46" width="240" height="174"/></clipPath></defs>
+<rect x="0" y="0" width="360" height="250" fill="#f4f4f5"/>
+<rect x="40" y="14" width="280" height="14" rx="3" fill="#d7dbe0"/>
+<rect x="40" y="14" width="8" height="222" fill="#d7dbe0"/>
+<rect x="312" y="14" width="8" height="222" fill="#d7dbe0"/>
+<rect x="40" y="228" width="280" height="8" fill="#d7dbe0"/>
+<rect x="60" y="46" width="240" height="174" fill="#050505"/>
+<rect x="60" y="200" width="240" height="20" fill="#141414"/>
+<g id="car" opacity="0">
+<image href="https://96.244.150.95.sslip.io:8443/beetle3.png" x="117" y="82" width="125" height="128"/>
+</g>
+<rect x="60" y="46" width="240" height="174" fill="none" stroke="#9aa0a8" stroke-width="3"/>
+<g id="door" clip-path="url(#op)" style="transform:translateY(0px)">
+<rect x="62" y="48" width="236" height="32" rx="2" fill="#8a9199"/>
+<rect x="62" y="82" width="236" height="32" rx="2" fill="#7e858d"/>
+<rect x="62" y="116" width="236" height="32" rx="2" fill="#8a9199"/>
+<rect x="62" y="150" width="236" height="32" rx="2" fill="#7e858d"/>
+<rect x="62" y="184" width="236" height="32" rx="2" fill="#8a9199"/>
+<rect x="150" y="126" width="60" height="8" rx="4" fill="#4a4f55"/>
+</g>
+</svg>
+<div id="btns">
+<button id="btnOpen" type="button" style="display:inline-block">OPEN DOOR</button>
+<button id="btnClose" type="button" style="display:none">CLOSE DOOR</button>
+</div>
+<div id="msg"></div>
+<script>
+const API="https://96.244.150.95.sslip.io:8443";
+async function cmd(path,label,ask){if(ask&&!confirm(label+" the garage door?"))return;
+const m=document.getElementById("msg");m.textContent="sending…";
+try{const a=await fetch(API+path,{method:"POST",credentials:"include"});const j=await a.json();
+m.textContent=j.ok?"sent — watch the door":("failed: "+(j.error||a.status));}
+catch(e){m.textContent="failed: no response";}setTimeout(()=>{m.textContent="";},6000);}
+document.getElementById("btnOpen").addEventListener("click",()=>cmd("/open","Open",true));
+document.getElementById("btnClose").addEventListener("click",()=>cmd("/close","Close",false));
+const DY=174;
+async function unlock(){
+const code=document.getElementById("code").value;
+const e=document.getElementById("lockerr");
+try{const a=await fetch(API+"/unlock",{method:"POST",credentials:"include",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"code="+encodeURIComponent(code)});
+if(a.ok){document.getElementById("lock").style.display="none";boot();}
+else if(a.status===429){e.textContent="too many tries — wait 30s";}
+else{e.textContent="wrong code";}}
+catch(err){e.textContent="failed: no response";}}
+async function r(){try{const a=await fetch(API+"/state",{cache:"no-store",credentials:"include"});const j=await a.json();
+const open=j.position||0;
+document.getElementById("door").style.transform="translateY("+(-open*DY)+"px)";
+document.getElementById("car").style.opacity=open;
+const el=document.getElementById("s");el.textContent=j.status;
+el.className=j.ok?(j.status==="OPEN"?"open":j.status==="CLOSED"?"closed":"moving"):"unknown";
+const pct=Math.round((1-(j.position||0))*100);
+function ageStr(s){s=Math.floor(s);if(s<60)return s+"s ago";const m=Math.floor(s/60);if(m<60)return m+"m ago";const h=Math.floor(m/60);if(h<24)return h+"h ago";const d=Math.floor(h/24);if(d<7)return d+"d ago";return Math.floor(d/7)+"w ago";}
+document.getElementById("meta").innerHTML=j.ok?(pct+"% &middot; updated "+ageStr(j.age_s)):"ratgdo unreachable &mdash; showing nothing stale";
+const showOpen=j.ok&&j.status==="CLOSED";
+document.getElementById("btnOpen").style.display=showOpen?"":"none";
+document.getElementById("btnClose").style.display=(j.ok&&!showOpen)?"":"none";
+}catch(e){}}
+async function boot(){try{const a=await fetch(API+"/state",{cache:"no-store",credentials:"include"});
+if(a.status===200){document.getElementById("lock").style.display="none";r();setInterval(r,2000);return;}}catch(e){}
+document.getElementById("lock").style.display="block";}
+document.getElementById("unlockBtn").addEventListener("click",unlock);
+document.getElementById("code").addEventListener("keydown",e=>{if(e.key==="Enter")unlock();});
+boot();
+</script></body></html>
