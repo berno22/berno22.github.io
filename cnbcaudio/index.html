@@ -325,8 +325,11 @@
         }
         srcNode = audioCtx.createMediaStreamSource(stream);
       } else {
-        if (userActivated) enableBoost();
-        srcNode = outNode || audioCtx.createMediaElementSource(video);
+        if (!outNode) {
+          outNode = audioCtx.createMediaElementSource(video);
+          if (!cnbcGain) outNode.connect(audioCtx.destination);   // audible before boost
+        }
+        srcNode = outNode;
       }
       analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
@@ -343,11 +346,14 @@
 
   // Route the element through a gain so CNBC can exceed 100%. Enabled only after
   // a real user gesture, so autoplay never ends up routed through a suspended
-  // (silent) AudioContext. Muted still silences the element/source.
+  // (silent) AudioContext. Idempotent: reuses an existing MediaElementSource
+  // (created by the analyser during muted autoplay) instead of failing on it.
   function enableBoost() {
-    if (outNode || !audioCtx || !userActivated) return;
+    if (!audioCtx || !userActivated) return;
+    if (cnbcGain) return;
     try {
-      outNode = audioCtx.createMediaElementSource(video);
+      if (!outNode) outNode = audioCtx.createMediaElementSource(video);
+      outNode.disconnect();
       cnbcGain = audioCtx.createGain();
       cnbcGain.gain.value = CNBC_GAIN;
       // Limiter so the boost gets louder without clipping/distorting peaks.
@@ -366,6 +372,7 @@
     }
   }
 
+  // A real user gesture happened: unlocks the context now and locks in the boost.
   function markActivated() {
     userActivated = true;
     ensureCtx();
@@ -501,8 +508,8 @@
     video.play().then(() => {
       playTries = 0;
       setStatus('Live'); startVis();
-      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => { wireAnalyser(); applyMute(); });
-      else { wireAnalyser(); applyMute(); }
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => { enableBoost(); wireAnalyser(); applyMute(); });
+      else { enableBoost(); wireAnalyser(); applyMute(); }
       sessionStorage.setItem('cnbcAutoReload', '0');
     }).catch(() => {
       playTries++;
@@ -525,8 +532,8 @@
       userMuted = false;
       video.muted = false;
       ensureCtx();
-      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => { wireAnalyser(); applyMute(); });
-      else { wireAnalyser(); applyMute(); }
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => { enableBoost(); wireAnalyser(); applyMute(); });
+      else { enableBoost(); wireAnalyser(); applyMute(); }
       setStatus('Live');
     } else if (video.paused === false) {
       sessionStorage.setItem('cnbcClickReload', '1');
@@ -588,8 +595,8 @@
     video.play().then(() => {
       setStatus(unmuted ? 'Live' : 'Muted - tap to unmute');
       startVis();
-      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => wireAnalyser());
-      else wireAnalyser();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => { enableBoost(); wireAnalyser(); });
+      else { enableBoost(); wireAnalyser(); }
       sessionStorage.setItem('cnbcAutoReload', '0');
     }).catch(() => {
       started = false;
