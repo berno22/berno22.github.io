@@ -225,13 +225,11 @@
   const gainctl = document.getElementById('gainctl');
   const gainslider = document.getElementById('gainslider');
   const gainpct = document.getElementById('gainpct');
-  let gainPct = 600;
+  let gainPct = Math.round(CNBC_GAIN * 100);
   try {
     const s = localStorage.getItem('cnbcGainPct');
     if (s) { const v = parseInt(s, 10); if (v >= 50 && v <= 800) gainPct = v; }
   } catch (e) {}
-  try { localStorage.setItem('cnbcGainPct', String(gainPct)); } catch (e) {}
-  if (gainPct !== 600) { gainPct = 600; try { localStorage.setItem('cnbcGainPct', '600'); } catch (e) {} }
   gainslider.value = gainPct;
   gainpct.textContent = gainPct + '%';
   gainslider.addEventListener('input', () => {
@@ -650,13 +648,9 @@
       if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => { enableBoost(); wireAnalyser(); applyMute(); });
       else { enableBoost(); wireAnalyser(); applyMute(); }
       setStatus('Live');
-      forceRefresh();
     } else if (video.paused === false) {
-      // Reloading the audio ALONE (plain refresh) is what was hiding this branch:
-      // clicking a running still now also forces an immediate fresh still.
       sessionStorage.setItem('cnbcClickReload', '1');
       refresh();
-      forceRefresh();
     } else if (userMuted === false) {
       started = true;
       ensureCtx();
@@ -1316,36 +1310,7 @@ function sqArt(u) {
 
   function draw() {
     if (!latched) return;
-    // Cold lead-in guard: a lone keyframe (or a frame within the first ~1s of a
-    // segment, when the wall hasn't advanced deep enough) often decodes black in
-    // WebCodecs. Hold the splash / previous still until a genuinely warm frame.
-    if (!S.warm && latched.timestamp / 1000 < 1000) {
-      try { latched.close(); } catch (e) {}
-      latched = null; bestPts = -1;
-      dbg();
-      return;
-    }
     try { c2.drawImage(latched, 0, 0, 960, 540); } catch (e) { S.lastErr = 'draw:' + e; }
-    S.warm = true;
-    // Never publish a still that is effectively black: sample a low-res copy and
-    // hold the splash / previous frame until a genuinely bright one decodes.
-    if (blobSamples) {
-      try {
-        blobSamples.width = cvSamp.width = 48; blobSamples.height = cvSamp.height = 27;
-        blobSamples.drawImage(latched, 0, 0, 48, 27);
-        const px = cvSamp.getImageData(0, 0, 48, 27).data;
-        let sum = 0;
-        for (let i = 0; i < px.length; i += 400) sum += (px[i] * 3 + px[i + 1] * 6 + px[i + 2]) / 10;
-        const avg = sum / Math.ceil(px.length / 400);
-        if (avg < 14) {
-          S.blackHeld++;
-          try { latched.close(); } catch (e) {}
-          latched = null; bestPts = -1;
-          dbg();
-          return;
-        }
-      } catch (e) {}
-    }
     lastFrameWall = curSegPdt + Math.round(latched.timestamp) / 1000;
     try { latched.close(); } catch (e) {}
     latched = null; bestPts = -1;
@@ -1495,16 +1460,6 @@ function sqArt(u) {
     if (!gated) return;
     gated = false;
     S.stage = 'start';
-    step();
-  };
-  // Force an IMMEDIATE fresh still (drop the segment/uri cache and re-step now),
-  // used when clicking a still that is already running — produces a new still on
-  // the spot in addition to the audio-side refresh.
-  window.__stillsRefresh = function () {
-    if (!S.supported) { dbg(); return; }
-    lastUri = ''; gated = false; S.stage = 'start';
-    S.warm = false; S.blackHeld = 0;
-    if (blobUrl) { try { URL.revokeObjectURL(blobUrl); } catch (e) {} blobUrl = null; }
     step();
   };
   if (!S.supported) dbg();
