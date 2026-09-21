@@ -131,7 +131,7 @@
   <audio id="lofi" crossorigin="anonymous" preload="none" playsinline></audio>
   <div id="gainctl">
     <div class="gcol">
-      <input id="gainslider" type="range" min="50" max="400" step="5" value="250" aria-label="CNBC volume percent">
+      <input id="gainslider" type="range" min="50" max="800" step="5" value="250" aria-label="CNBC volume percent">
       <div id="gainpct">250%</div>
       <div class="glabel">CNBC</div>
     </div>
@@ -192,7 +192,7 @@
   let gainPct = Math.round(CNBC_GAIN * 100);
   try {
     const s = localStorage.getItem('cnbcGainPct');
-    if (s) { const v = parseInt(s, 10); if (v >= 50 && v <= 400) gainPct = v; }
+    if (s) { const v = parseInt(s, 10); if (v >= 50 && v <= 800) gainPct = v; }
   } catch (e) {}
   gainslider.value = gainPct;
   gainpct.textContent = gainPct + '%';
