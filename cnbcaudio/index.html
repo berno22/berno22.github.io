@@ -1077,6 +1077,7 @@ function sqArt(u) {
   const MASTER = 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
   let busy = false, initBytes = null, avcC = null, tsScale = 10000000, dec = null;
   let targetU = Infinity, curRef = 0;
+  let lastWallMs = 0, lastFrameWall = 0, lastSrc = 'live', curSegPdt = 0;
   let gated = true;
   let lastUri = '', failN = 0, latched = null, bestPts = -1, blobUrl = null;
   const cv = document.createElement('canvas');
@@ -1306,6 +1307,7 @@ function sqArt(u) {
   function draw() {
     if (!latched) return;
     try { c2.drawImage(latched, 0, 0, 960, 540); } catch (e) { S.lastErr = 'draw:' + e; }
+    lastFrameWall = curSegPdt + Math.round(latched.timestamp) / 1000;
     try { latched.close(); } catch (e) {}
     latched = null; bestPts = -1;
     cv.toBlob(function (b) {
@@ -1366,7 +1368,13 @@ function sqArt(u) {
             if (wallMs !== null) curRef = c.cur;
           }
         }
-        window.__stillsDbg = { wallMs: Math.round(wallMs || 0), src: wallSrc, cur: c ? +c.cur.toFixed(2) : null };
+        window.__stillsDbg = {
+          wallMs: Math.round(wallMs || 0),
+          frameWall: Math.round(lastFrameWall || 0),
+          dts: Math.round(Date.now() - lastFrameWall),
+          src: wallMs !== null ? wallSrc : lastSrc,
+          cur: c ? +c.cur.toFixed(2) : null
+        };
         let seg, target = Infinity;
         if (wallMs !== null && p.segs.length) {
           seg = null; let bi = Infinity;
@@ -1381,6 +1389,7 @@ function sqArt(u) {
           seg = pickSeg(p.segs);
         }
         targetU = target;
+        lastWallMs = wallMs || 0; lastSrc = wallSrc; curSegPdt = seg.pdt;
         if (!seg) throw new Error('no segments');
         if (wallMs === null) return false;  // never show a live-edge frame that leads the audio; hold splash/last frame
         if (seg.uri === lastUri) { return false; }
@@ -1414,7 +1423,7 @@ function sqArt(u) {
                 data: segb.slice(s.off, s.off + s.size)
               }));
             }
-            S.info = 'fed ' + r.samples.length + ' chunks Δ' + (wallMs !== null ? Math.round((wallMs - Date.now()) / 1000) + 's:' + wallSrc : 'live');
+            S.info = 'fed ' + r.samples.length + ' chunks Δ' + (wallMs !== null ? Math.round((wallMs - Date.now()) / 1000) + 's:' + wallSrc : 'live') + ' fΔ' + Math.round((Date.now() - (lastFrameWall || Date.now())) / 1000) + 's';
             const guard = new Promise(function (res) { setTimeout(res, 3000); });
             return Promise.race([dec.flush().catch(function (e) { S.lastErr = 'flush:' + (e && e.message); }), guard]);
           });
