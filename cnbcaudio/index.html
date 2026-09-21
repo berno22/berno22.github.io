@@ -10,8 +10,7 @@
   body { margin: 0; background: #f6f6f4; color: #111;
          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
   #wrap { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-          background: #f6f6f4; overflow-y: auto; box-sizing: border-box; padding-bottom: 60px; }
-  #wrap::after { content: ""; height: 32px; }  /* balances #brand so the card stays 30px above dead-center */
+          background: #f6f6f4; overflow-y: auto; }
   #card { position: relative; z-index: 1; text-align: center; padding: 32px; zoom: 1.69;
           margin: auto;
           background: #fff; border: 1px solid rgba(0,0,0,0.08); border-radius: 20px;
@@ -37,8 +36,7 @@
     transition: border-color .25s;
   }
   #art:hover { border-color: rgba(0,0,0,0.08); }
-  #brand { position: relative; z-index: 2; width: 132px; aspect-ratio: 900 / 506;
-          margin: 16px 0 2px; pointer-events: none;
+  #brand { width: 132px; aspect-ratio: 900 / 506; pointer-events: none; margin-bottom: -6px;
           background: #a3a6aa;
           -webkit-mask-image: url('cnbc-logo.png'); -webkit-mask-size: contain;
           -webkit-mask-repeat: no-repeat; -webkit-mask-position: center;
@@ -64,26 +62,30 @@
   }
   #upnext:empty { display: none; }
   #adctl {
-    position: absolute; z-index: 2; left: 50%; top: calc(100% + 30px);
-    transform: translateX(-50%); display: flex; align-items: center; justify-content: center;
-    gap: 4px; padding: 4px; border-radius: 999px;
-    background: rgba(140,143,148,0.32); backdrop-filter: blur(6px);
-    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-    visibility: hidden; opacity: 0; pointer-events: none;
-    transition: opacity .25s, visibility .25s;
+    position: fixed; left: 18px; top: 50%; transform: translateY(-50%);
+    z-index: 20; display: none; flex-direction: column; align-items: center; gap: 6px;
   }
-  #adctl.show { visibility: visible; opacity: 1; pointer-events: auto; }
-  .seg {
-    appearance: none; border: none; background: none; cursor: pointer;
-    color: #a3a6aa; font: 600 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    letter-spacing: .3px; padding: 8px 14px; border-radius: 999px;
-    -webkit-tap-highlight-color: transparent; transition: background .15s, color .15s;
+  #adctl.show { display: flex; }
+  #admute {
+    display: flex; align-items: center; justify-content: center;
+    width: 48px; height: 48px; padding: 0; background: none; border: none;
+    color: #a3a6aa; cursor: pointer; -webkit-tap-highlight-color: transparent;
+    filter: drop-shadow(0 0 3px rgba(255,255,255,0.95)) drop-shadow(0 1px 3px rgba(255,255,255,0.9));
+    transition: transform .15s, opacity .15s;
   }
-  .seg:hover { color: #7c7f83; }
-  .seg.on { background: #a3a6aa; color: #fff; }
+  #admute:hover { opacity: 0.7; }
+  #admute:active { transform: scale(0.9); }
+  #admute svg { width: 32px; height: 32px; display: block; }
+  #admute .ic-on { display: none; }
+  #admute.unmuted .ic-muted { display: none; }
+  #admute.unmuted .ic-on { display: block; }
+  #adcount {
+    color: #a3a6aa; font: 600 12px/1 ui-monospace, Menlo, monospace; letter-spacing: .5px;
+    padding: 3px 8px; border-radius: 999px; background: rgba(163,166,170,0.18);
+  }
   #vis {
-    position: fixed; left: 0; right: 0; top: 50%; transform: translateY(-50%);
-    width: 100%; height: 78vh; z-index: 0; pointer-events: none;
+    position: absolute; left: 0; right: 0; bottom: 0;
+    width: 100%; height: 330px; z-index: 0; pointer-events: none;
     opacity: 0; transition: opacity .5s;
   }
   #vis.on { opacity: 1; }
@@ -103,13 +105,24 @@
     <div id="desc"></div>
     <div id="upnext"></div>
     <div id="err"></div>
-    <div id="adctl" role="group" aria-label="Ad break audio">
-      <button class="seg" type="button" data-mode="mute">Mute</button>
-      <button class="seg" type="button" data-mode="ads">Ads</button>
-    </div>
   </div>
   <canvas id="vis"></canvas>
   <video id="video" controls muted playsinline preload="auto"></video>
+  <div id="adctl">
+    <button id="admute" type="button" title="Mute / unmute ad" aria-label="Mute or unmute advertisement">
+      <svg class="ic ic-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 5 6 9H3v6h3l5 4V5z"/>
+        <line x1="22" y1="9" x2="16" y2="15"/>
+        <line x1="16" y1="9" x2="22" y2="15"/>
+      </svg>
+      <svg class="ic ic-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 5 6 9H3v6h3l5 4V5z"/>
+        <path d="M15.5 8.5a5 5 0 0 1 0 7"/>
+        <path d="M18.5 5.5a9 9 0 0 1 0 13"/>
+      </svg>
+    </button>
+    <div id="adcount">--</div>
+  </div>
 </div>
 <script>
   const video = document.getElementById('video');
@@ -121,7 +134,8 @@
   let mediaMeta = null;
   const errBox = document.getElementById('err');
   const adctl = document.getElementById('adctl');
-  const segs = Array.from(document.querySelectorAll('#adctl .seg'));
+  const admute = document.getElementById('admute');
+  const adcount = document.getElementById('adcount');
   const vis = document.getElementById('vis');
   const ctx = vis.getContext('2d');
   let VW = 420, VH = 150;
@@ -144,20 +158,11 @@
   let edgePdt = null;                 // program time of the last segment in the playlist
   let lastSegDur = 0;                 // duration of the last segment (seconds)
   let inAd = false;                   // playback is currently inside a 0x22 break
+  let adOverride = false;             // user chose to hear the current break
   let userMuted = true;               // user's own mute preference (normal content)
-  let wired = false;                  // analyser wired to the element's audio
-  let outNode = null, cnbcGain = null; // Web Audio output path (lets CNBC exceed 100%)
-  let userActivated = false;           // a real gesture happened (safe to route Web Audio)
-  const CNBC_GAIN = 8.0;   // always 800%
+  let gain = null, wired = false;     // Web Audio output gain (keeps analyser on real audio)
   const AD_TICK = 250;
   const ADV_LOOKBACK = 0;             // extra ms to keep muting past planned end
-
-  // What to do during an ad break: 'mute' | 'ads' (cached).
-  const BREAK_MODES = ['mute', 'ads'];
-  let breakMode = (function () {
-    try { const m = localStorage.getItem('cnbcBreakMode'); if (BREAK_MODES.indexOf(m) >= 0) return m; } catch (e) {}
-    return 'mute';
-  })();
 
   function fetchText(url, ms) {
     const ctl = new AbortController();
@@ -295,93 +300,48 @@
     }
   }
 
-  // Tap the element's own audio for the visualizer via captureStream(). Per spec
-  // the capture keeps producing real samples even while the element is muted, so
-  // the bars stay live during ad-break muting; the element still plays the sound.
-  let wireTries = 0;
+  // Web Audio output path: element -> gain -> destination, with the analyser
+  // tapped straight off the element so it always sees REAL audio, even while an
+  // ad is silenced by pulling the gain to 0.
   function wireAnalyser() {
-    if (wired || !started) return;
-    ensureCtx();
-    if (!audioCtx) return;
-    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    if (wired || !audioCtx || !started) return;
     try {
-      let srcNode = null;
-      if (video.captureStream) {
-        const stream = video.captureStream();
-        if (!stream.getAudioTracks().length) {
-          if (wireTries++ < 12) { setTimeout(wireAnalyser, 300); return; }
-          return;
-        }
-        srcNode = audioCtx.createMediaStreamSource(stream);
-      } else {
-        if (!outNode) {
-          outNode = audioCtx.createMediaElementSource(video);
-          if (!cnbcGain) outNode.connect(audioCtx.destination);   // audible before boost
-        }
-        srcNode = outNode;
-      }
+      const srcNode = audioCtx.createMediaElementSource(video);
+      gain = audioCtx.createGain();
+      srcNode.connect(gain);
+      gain.connect(audioCtx.destination);
       analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.82;
       srcNode.connect(analyser);
       dataArray = new Uint8Array(analyser.frequencyBinCount);
       wired = true;
-      if (userActivated) enableBoost();
       applyMute();
     } catch (e) {
-      analyser = null; wired = false;
+      analyser = null; gain = null; wired = false;
     }
   }
 
-  // Route the element through a gain so CNBC can exceed 100%. Enabled only after
-  // a real user gesture, so autoplay never ends up routed through a suspended
-  // (silent) AudioContext. Idempotent: reuses an existing MediaElementSource
-  // (created by the analyser during muted autoplay) instead of failing on it.
-  function enableBoost() {
-    if (!audioCtx || !userActivated) return;
-    if (cnbcGain) return;
-    try {
-      if (!outNode) outNode = audioCtx.createMediaElementSource(video);
-      outNode.disconnect();
-      cnbcGain = audioCtx.createGain();
-      cnbcGain.gain.value = CNBC_GAIN;
-      // Limiter so the boost gets louder without clipping/distorting peaks.
-      const lim = audioCtx.createDynamicsCompressor();
-      lim.threshold.value = -2;
-      lim.knee.value = 0;
-      lim.ratio.value = 20;
-      lim.attack.value = 0.003;
-      lim.release.value = 0.25;
-      outNode.connect(cnbcGain);
-      cnbcGain.connect(lim);
-      lim.connect(audioCtx.destination);
-      if (analyser && !video.captureStream) outNode.connect(analyser);
-    } catch (e) {
-      outNode = null; cnbcGain = null;
-    }
-  }
-
-  // A real user gesture happened: unlocks the context now and locks in the boost.
-  function markActivated() {
-    userActivated = true;
-    ensureCtx();
-    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(enableBoost).catch(() => {});
-    else enableBoost();
-  }
-  document.addEventListener('pointerdown', markActivated, { once: true });
-  document.addEventListener('keydown', markActivated, { once: true });
-
-  // silence = user mute, or an ad break the user hasn't chosen to hear.
-  // The CNBC stream is never stopped or swapped on breaks - only muted.
+  // silence = user mute, or an ad break the user hasn't chosen to hear
   function applyMute() {
-    if (inAd) video.muted = breakMode !== 'ads';
-    else video.muted = userMuted;
+    const silent = inAd ? !adOverride : userMuted;
+    if (gain) gain.gain.value = silent ? 0 : 1;
+    else video.muted = silent;
   }
 
   function fmtTime(sec) {
     if (sec < 60) return sec + 's';
     const m = Math.floor(sec / 60), s = sec % 60;
     return s ? m + 'm' + s + 's' : m + 'm';
+  }
+
+  let phase = 0, synthStart = 0, synthetic = false;
+
+  function synthTarget(i, t) {
+    const base = 0.18 + 0.35 * Math.abs(Math.sin(t * 1.4 + i * 0.6));
+    const wob = 0.45 * Math.abs(Math.sin(t * 3.1 + Math.sin(i * 0.9 + t) * 2.2));
+    const spike = Math.pow(Math.max(0, Math.sin(t * 0.7 + i * 1.3) - 0.86) / 0.14, 2) * 0.5;
+    return Math.min(1, base + wob + spike);
   }
 
   function drawBar(x, y, w, h) {
@@ -393,20 +353,33 @@
 
   function render() {
     raf = requestAnimationFrame(render);
+    phase += 0.016;
     const midY = VH / 2;
     ctx.clearRect(0, 0, VW, VH);
 
-    const a = analyser;
-    const d = dataArray;
-    if (a && d) a.getByteFrequencyData(d);
+    let alive = 0;
+    if (analyser && dataArray) {
+      analyser.getByteFrequencyData(dataArray);
+      for (let i = 0; i < dataArray.length; i++) alive += dataArray[i];
+      if (alive > 0) synthetic = false;
+      if (alive === 0) {
+        if (!synthStart) synthStart = performance.now();
+        else if (performance.now() - synthStart > 700) synthetic = true;
+      } else {
+        synthStart = 0;
+      }
+    } else {
+      synthStart = 0;
+      synthetic = true;
+    }
 
     ctx.globalAlpha = 0.85;
     for (let i = 0; i < N; i++) {
-      if (a && d) {
-        const idx = Math.floor(Math.pow(i / N, 1.6) * (d.length * 0.75));
-        tgt[i] = d[idx] / 255;
+      if (analyser && dataArray && !synthetic) {
+        const idx = Math.floor(Math.pow(i / N, 1.6) * (dataArray.length * 0.75));
+        tgt[i] = dataArray[idx] / 255;
       } else {
-        tgt[i] = 0;
+        tgt[i] = synthTarget(i, phase);
       }
       vel[i] += (tgt[i] - levels[i]) * 0.22;
       vel[i] *= 0.78;
@@ -450,8 +423,8 @@
     video.play().then(() => {
       playTries = 0;
       setStatus('Live'); startVis();
-      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => { enableBoost(); wireAnalyser(); applyMute(); });
-      else { enableBoost(); wireAnalyser(); applyMute(); }
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => { wireAnalyser(); applyMute(); });
+      else { wireAnalyser(); applyMute(); }
       sessionStorage.setItem('cnbcAutoReload', '0');
     }).catch(() => {
       playTries++;
@@ -469,14 +442,16 @@
       ensureCtx();
       boot(true);
     } else if (video.paused === false && inAd) {
-      // During a break, CNBC stays playing; only Mute | Ads controls the sound.
+      adOverride = !adOverride;
+      applyMute();
+      admute.classList.toggle('unmuted', adOverride);
+      renderBreak();
     } else if (video.paused === false && userMuted) {
       userMuted = false;
       video.muted = false;
       ensureCtx();
-      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => { enableBoost(); wireAnalyser(); applyMute(); });
-      else { enableBoost(); wireAnalyser(); applyMute(); }
       setStatus('Live');
+      applyMute();
     } else if (video.paused === false) {
       sessionStorage.setItem('cnbcClickReload', '1');
       refresh();
@@ -497,23 +472,13 @@
   }
   updateMediaSession('CNBC Audio');
 
-  function setBreakMode(mode) {
-    if (BREAK_MODES.indexOf(mode) < 0 || mode === breakMode) return;
-    breakMode = mode;
-    try { localStorage.setItem('cnbcBreakMode', mode); } catch (e) {}
-    syncSegs();
-    ensureCtx();
-    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  admute.addEventListener('click', (e) => {
+    e.stopPropagation();
+    adOverride = !adOverride;
     applyMute();
+    admute.classList.toggle('unmuted', adOverride);
     if (inAd) renderBreak();
-  }
-  function syncSegs() {
-    for (const b of segs) b.classList.toggle('on', b.dataset.mode === breakMode);
-  }
-  for (const b of segs) {
-    b.addEventListener('click', (e) => { e.stopPropagation(); setBreakMode(b.dataset.mode); });
-  }
-  syncSegs();
+  });
 
   function tryAutoplay() {
     if (video.paused === false) {
@@ -530,8 +495,8 @@
     video.play().then(() => {
       setStatus(unmuted ? 'Live' : 'Muted - tap to unmute');
       startVis();
-      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => { enableBoost(); wireAnalyser(); });
-      else { enableBoost(); wireAnalyser(); }
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => wireAnalyser());
+      else wireAnalyser();
       sessionStorage.setItem('cnbcAutoReload', '0');
     }).catch(() => {
       started = false;
@@ -630,33 +595,11 @@ function sqArt(u) {
     }
   }
 
-  let lastAdText = '';
-  function breakLeft() {
-    const t = playingProgramTime();
-    for (const w of breakWindows) {
-      if (w.brk && t >= w.s && t < w.e + ADV_LOOKBACK) return Math.max(0, Math.ceil((w.e - t) / 1000));
-    }
-    return null;
-  }
-  const BREAK_LABELS = { mute: 'Mute', ads: 'Ads' };
-  function adText() {
-    const left = breakLeft();
-    return 'Ad break \u00b7 ' + (left != null ? fmtTime(left) : '--') + ' \u00b7 ' + (BREAK_LABELS[breakMode] || breakMode);
-  }
-  // Drives both the on-page description and the mini-player / lock-screen metadata.
-  function renderAdText() {
-    const s = adText();
-    if (s === lastAdText) return;
-    lastAdText = s;
-    cutEl.textContent = s;
-    updateMediaSession('CNBC - ' + s, '', '', ART_LOGO);
-  }
-
   function renderBreak() {
-    lastAdText = '';
-    renderAdText();
+    cutEl.textContent = 'Advertisement \u00b7 ' + (adOverride ? 'sound on' : 'muted');
     cutEl.classList.add('ad');
     artEl.src = ART_LOGO;
+    updateMediaSession('CNBC - Advertisement', '', '', ART_LOGO);
   }
 
   function renderShow(live) {
@@ -665,7 +608,7 @@ function sqArt(u) {
     title.textContent = live.title;
     document.title = live.title + ' \u00b7 CNBC Audio';
     if (inAd) {
-      renderAdText();
+      cutEl.textContent = 'Advertisement \u00b7 ' + (adOverride ? 'sound on' : 'muted');
       cutEl.classList.add('ad');
     } else {
       cutEl.textContent = '';
@@ -687,7 +630,7 @@ function sqArt(u) {
     artEl.src = inAd ? ART_LOGO : (splashUrl || ART_LOGO);
     const lockImg = ART_LOGO;
     updateMediaSession(
-      'CNBC - ' + (inAd ? adText() : live.title), '',
+      'CNBC - ' + (inAd ? 'Advertisement' : live.title), '',
       live.displayGenre || '',
       ART_LOGO
     );
@@ -843,12 +786,16 @@ function sqArt(u) {
     const now = !!hit;
     if (now !== inAd) {
       inAd = now;
+      if (inAd) adOverride = false;
       applyMute();
       adctl.classList.toggle('show', inAd);
+      admute.classList.toggle('unmuted', adOverride);
       if (inAd) renderBreak();
-      else { cutEl.textContent = ''; cutEl.classList.remove('ad'); lastAdText = ''; maybeGuide(); }
+      else { cutEl.textContent = ''; cutEl.classList.remove('ad'); maybeGuide(); }
     }
-    if (inAd) renderAdText();
+    if (inAd) {
+      adcount.textContent = hit ? fmtTime(Math.max(0, Math.ceil((hit.e - t) / 1000))) : '--';
+    }
   }
 
   artEl.src = ART_LOGO;
