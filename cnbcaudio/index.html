@@ -235,6 +235,17 @@
     try { const m = localStorage.getItem('cnbcBreakMode'); if (BREAK_MODES.indexOf(m) >= 0) return m; } catch (e) {}
     return 'lofi';
   })();
+  let boostDefaulted = false;
+  function boostAtStart() {
+    if (boostDefaulted) return;
+    boostDefaulted = true;
+    gainPct = 600;
+    gainslider.value = '600';
+    gainpct.textContent = '600%';
+    try { localStorage.setItem('cnbcGainPct', '600'); } catch (e) {}
+    if (cnbcGain && cnbcGain.gain) cnbcGain.gain.value = 6;
+    if (window.__stillsGo) window.__stillsGo();
+  }
   const LOFI_STREAMS = [
     'https://radio.loficafe.net/listen/chilling/radio.mp3',
     'https://radio.loficafe.net/listen/sleeping/radio.mp3',
@@ -598,11 +609,13 @@
 
   function togglePlay() {
     if (!started) {
+      boostAtStart();
       ensureCtx();
       boot(true);
     } else if (video.paused === false && inAd) {
       // During a break, audio is controlled only by the LoFi | Mute | Ads selector.
     } else if (video.paused === false && userMuted) {
+      boostAtStart();
       userMuted = false;
       video.muted = false;
       ensureCtx();
@@ -1038,6 +1051,7 @@ function sqArt(u) {
   const MASTER = 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
   let busy = false, initBytes = null, avcC = null, tsScale = 10000000, dec = null;
   let targetU = Infinity, curRef = 0;
+  let gated = true;
   let lastUri = '', failN = 0, latched = null, bestPts = -1, blobUrl = null;
   const cv = document.createElement('canvas');
   cv.width = 960; cv.height = 540;
@@ -1291,7 +1305,7 @@ function sqArt(u) {
   // fetch => parse => decode => draw one segment. Returns true when a new frame drew.
   function step() {
     if (!S.supported) { S.lastErr = 'WebCodecs unavailable'; dbg(); return; }
-    if (busy || document.hidden) return;
+    if (gated || busy || document.hidden) return;
     busy = true;
     S.attempts++; S.stage = 'master';
     fetchTxt(bump(MASTER)).then(function (mt) {
@@ -1392,8 +1406,16 @@ function sqArt(u) {
     });
   }
 
-  if (S.supported) step();
-  else dbg();
+  // Stills stay off (old splash) until the user clicks the logo, which calls
+  // window.__stillsGo() from the main script alongside the one-time 600% boost.
+  window.__stillsGo = function () {
+    if (!S.supported) { dbg(); return; }
+    if (!gated) return;
+    gated = false;
+    S.stage = 'start';
+    step();
+  };
+  if (!S.supported) dbg();
 })();
 </script>
 </body>
