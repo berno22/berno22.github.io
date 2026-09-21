@@ -10,7 +10,7 @@
   body { margin: 0; background: #f6f6f4; color: #111;
          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
   #wrap { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-          background: #f6f6f4; overflow-y: auto; }
+          background: #f6f6f4; overflow-y: auto; box-sizing: border-box; padding-bottom: 60px; }
   #card { position: relative; z-index: 1; text-align: center; padding: 32px; zoom: 1.69;
           margin: auto;
           background: #fff; border: 1px solid rgba(0,0,0,0.08); border-radius: 20px;
@@ -62,8 +62,8 @@
   }
   #upnext:empty { display: none; }
   #adctl {
-    position: fixed; left: 18px; top: 50%; transform: translateY(-50%);
-    z-index: 20; display: none; flex-direction: column; align-items: center; gap: 6px;
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    z-index: 20; display: none; align-items: center; justify-content: center;
   }
   #adctl.show { display: flex; }
   #admute {
@@ -79,12 +79,8 @@
   #admute .ic-on { display: none; }
   #admute.unmuted .ic-muted { display: none; }
   #admute.unmuted .ic-on { display: block; }
-  #adcount {
-    color: #a3a6aa; font: 600 12px/1 ui-monospace, Menlo, monospace; letter-spacing: .5px;
-    padding: 3px 8px; border-radius: 999px; background: rgba(163,166,170,0.18);
-  }
   #vis {
-    position: absolute; left: 0; right: 0; bottom: 0;
+    position: absolute; left: 0; right: 0; bottom: 72px;
     width: 100%; height: 330px; z-index: 0; pointer-events: none;
     opacity: 0; transition: opacity .5s;
   }
@@ -121,7 +117,6 @@
         <path d="M18.5 5.5a9 9 0 0 1 0 13"/>
       </svg>
     </button>
-    <div id="adcount">--</div>
   </div>
 </div>
 <script>
@@ -135,7 +130,6 @@
   const errBox = document.getElementById('err');
   const adctl = document.getElementById('adctl');
   const admute = document.getElementById('admute');
-  const adcount = document.getElementById('adcount');
   const vis = document.getElementById('vis');
   const ctx = vis.getContext('2d');
   let VW = 420, VH = 150;
@@ -345,15 +339,6 @@
     return s ? m + 'm' + s + 's' : m + 'm';
   }
 
-  let phase = 0, synthStart = 0, synthetic = false;
-
-  function synthTarget(i, t) {
-    const base = 0.18 + 0.35 * Math.abs(Math.sin(t * 1.4 + i * 0.6));
-    const wob = 0.45 * Math.abs(Math.sin(t * 3.1 + Math.sin(i * 0.9 + t) * 2.2));
-    const spike = Math.pow(Math.max(0, Math.sin(t * 0.7 + i * 1.3) - 0.86) / 0.14, 2) * 0.5;
-    return Math.min(1, base + wob + spike);
-  }
-
   function drawBar(x, y, w, h) {
     ctx.beginPath();
     if (ctx.roundRect) ctx.roundRect(x, y, w, h, 4);
@@ -363,33 +348,18 @@
 
   function render() {
     raf = requestAnimationFrame(render);
-    phase += 0.016;
     const midY = VH / 2;
     ctx.clearRect(0, 0, VW, VH);
 
-    let alive = 0;
-    if (analyser && dataArray) {
-      analyser.getByteFrequencyData(dataArray);
-      for (let i = 0; i < dataArray.length; i++) alive += dataArray[i];
-      if (alive > 0) synthetic = false;
-      if (alive === 0) {
-        if (!synthStart) synthStart = performance.now();
-        else if (performance.now() - synthStart > 700) synthetic = true;
-      } else {
-        synthStart = 0;
-      }
-    } else {
-      synthStart = 0;
-      synthetic = true;
-    }
+    if (analyser && dataArray) analyser.getByteFrequencyData(dataArray);
 
     ctx.globalAlpha = 0.85;
     for (let i = 0; i < N; i++) {
-      if (analyser && dataArray && !synthetic) {
+      if (analyser && dataArray) {
         const idx = Math.floor(Math.pow(i / N, 1.6) * (dataArray.length * 0.75));
         tgt[i] = dataArray[idx] / 255;
       } else {
-        tgt[i] = synthTarget(i, phase);
+        tgt[i] = 0;
       }
       vel[i] += (tgt[i] - levels[i]) * 0.22;
       vel[i] *= 0.78;
@@ -607,11 +577,32 @@ function sqArt(u) {
     }
   }
 
+  let lastAdText = '';
+  function breakLeft() {
+    const t = playingProgramTime();
+    for (const w of breakWindows) {
+      if (w.brk && t >= w.s && t < w.e + ADV_LOOKBACK) return Math.max(0, Math.ceil((w.e - t) / 1000));
+    }
+    return null;
+  }
+  function adText() {
+    const left = breakLeft();
+    return 'Ad break \u00b7 ' + (left != null ? fmtTime(left) : '--') + ' \u00b7 ' + (adOverride ? 'sound on' : 'muted');
+  }
+  // Drives both the on-page description and the mini-player / lock-screen metadata.
+  function renderAdText() {
+    const s = adText();
+    if (s === lastAdText) return;
+    lastAdText = s;
+    cutEl.textContent = s;
+    updateMediaSession('CNBC - ' + s, '', '', ART_LOGO);
+  }
+
   function renderBreak() {
-    cutEl.textContent = 'Advertisement \u00b7 ' + (adOverride ? 'sound on' : 'muted');
+    lastAdText = '';
+    renderAdText();
     cutEl.classList.add('ad');
     artEl.src = ART_LOGO;
-    updateMediaSession('CNBC - Advertisement', '', '', ART_LOGO);
   }
 
   function renderShow(live) {
@@ -620,7 +611,7 @@ function sqArt(u) {
     title.textContent = live.title;
     document.title = live.title + ' \u00b7 CNBC Audio';
     if (inAd) {
-      cutEl.textContent = 'Advertisement \u00b7 ' + (adOverride ? 'sound on' : 'muted');
+      renderAdText();
       cutEl.classList.add('ad');
     } else {
       cutEl.textContent = '';
@@ -642,7 +633,7 @@ function sqArt(u) {
     artEl.src = inAd ? ART_LOGO : (splashUrl || ART_LOGO);
     const lockImg = ART_LOGO;
     updateMediaSession(
-      'CNBC - ' + (inAd ? 'Advertisement' : live.title), '',
+      'CNBC - ' + (inAd ? adText() : live.title), '',
       live.displayGenre || '',
       ART_LOGO
     );
@@ -803,11 +794,9 @@ function sqArt(u) {
       adctl.classList.toggle('show', inAd);
       admute.classList.toggle('unmuted', adOverride);
       if (inAd) renderBreak();
-      else { cutEl.textContent = ''; cutEl.classList.remove('ad'); maybeGuide(); }
+      else { cutEl.textContent = ''; cutEl.classList.remove('ad'); lastAdText = ''; maybeGuide(); }
     }
-    if (inAd) {
-      adcount.textContent = hit ? fmtTime(Math.max(0, Math.ceil((hit.e - t) / 1000))) : '--';
-    }
+    if (inAd) renderAdText();
   }
 
   artEl.src = ART_LOGO;
