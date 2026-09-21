@@ -30,7 +30,7 @@
   #np.on { display: block; animation: fadein .5s ease; }
   @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
   #art {
-    display: block; margin: 0 auto; height: 173px; width: auto; max-width: 600px; border-radius: 12px; object-fit: contain;
+    display: block; margin: 0 auto; height: 260px; width: auto; max-width: 600px; border-radius: 12px; object-fit: contain;
     border: 1px solid rgba(0,0,0,0.08);
     box-shadow: 0 4px 16px rgba(0,0,0,0.08);
     cursor: pointer; user-select: none; outline: none; -webkit-tap-highlight-color: transparent;
@@ -153,6 +153,28 @@
       start: st && st.length ? st.start(0) : NaN,
       end: st && st.length ? st.end(st.length - 1) : NaN
     };
+  };
+  // Wall-clock (ms) of the audio currently playing, straight from hls.js's
+  // EXT-X-PROGRAM-DATE-TIME bookkeeping for the fragment under the playhead.
+  window.__cnbcWall = function () {
+    if (!hlsInst) return null;
+    try {
+      const lv = hlsInst.levels;
+      if (!lv || !lv.length) return null;
+      const li = hlsInst.currentLevel >= 0 ? hlsInst.currentLevel : 0;
+      const det = lv[li] && lv[li].details;
+      if (!det || !det.fragments || !det.fragments.length) return null;
+      const cur = video.currentTime;
+      if (isNaN(cur)) return null;
+      for (let i = det.fragments.length - 1; i >= 0; i--) {
+        const f = det.fragments[i];
+        if (cur >= f.start - 0.5 && cur < f.start + (f.duration || 0)) {
+          if (f.programDateTime) return f.programDateTime + (cur - f.start) * 1000;
+          break;
+        }
+      }
+    } catch (e) {}
+    return null;
   };
   const title = document.getElementById('title');
   const status = document.getElementById('status');
