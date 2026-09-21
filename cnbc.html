@@ -6,16 +6,38 @@
 <title>CNBC Stream</title>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 <style>
-  body { margin: 0; background: #000; }
+  body { margin: 0; background: #000; color: #eee; font: 14px system-ui; }
   #wrap { position: fixed; inset: 0; }
   video { width: 100%; height: 100%; background: #000; }
   #overlay {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.55); color: #fff; font: 16px system-ui; cursor: pointer; z-index: 10;
+    background: rgba(0,0,0,0.55); color: #fff; font: 20px system-ui; cursor: pointer; z-index: 10;
   }
   #overlay.hidden { display: none; }
   #err { position: absolute; top: 8px; left: 8px; right: 8px; color: #f66;
          font: 12px system-ui; white-space: pre-wrap; z-index: 20; }
+  #err:empty { display: none; }
+  #adctl {
+    position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
+    z-index: 15; display: none; flex-direction: column; align-items: center; gap: 6px;
+  }
+  #adctl.show { display: flex; }
+  #admute {
+    display: flex; align-items: center; justify-content: center;
+    width: 48px; height: 48px; padding: 0; background: none; border: none;
+    color: #fff; cursor: pointer; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.95));
+    transition: transform .15s, opacity .15s;
+  }
+  #admute:active { transform: scale(0.9); }
+  #admute svg { width: 32px; height: 32px; display: block; }
+  #adcount {
+    color: #fff; font: 600 12px/1 ui-monospace, Menlo, monospace; letter-spacing: .5px;
+    padding: 3px 8px; border-radius: 999px; background: rgba(0,0,0,0.5);
+    filter: drop-shadow(0 1px 3px rgba(0,0,0,0.9));
+  }
+  #admute .ic-on { display: none; }
+  #admute.unmuted .ic-muted { display: none; }
+  #admute.unmuted .ic-on { display: block; }
 </style>
 </head>
 <body>
@@ -23,12 +45,37 @@
   <video id="video" muted playsinline preload="auto"></video>
   <div id="overlay">Tap for sound</div>
   <div id="err"></div>
+  <div id="adctl">
+    <button id="admute" title="Mute / unmute ad" aria-label="Mute or unmute ad">
+      <svg class="ic ic-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 5 6 9H3v6h3l5 4V5z"/>
+        <line x1="22" y1="9" x2="16" y2="15"/>
+        <line x1="16" y1="9" x2="22" y2="15"/>
+      </svg>
+      <svg class="ic ic-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 5 6 9H3v6h3l5 4V5z"/>
+        <path d="M15.5 8.5a5 5 0 0 1 0 7"/>
+        <path d="M18.5 5.5a9 9 0 0 1 0 13"/>
+      </svg>
+    </button>
+    <div id="adcount">--</div>
+  </div>
 </div>
 <script>
   const video = document.getElementById('video');
   const overlay = document.getElementById('overlay');
   const errBox = document.getElementById('err');
+  const adctl = document.getElementById('adctl');
+  const admute = document.getElementById('admute');
+  const adcount = document.getElementById('adcount');
   const src = 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
+
+  let hls = null;
+  let soundOn = false;       // user tapped for sound
+  let adBreak = false;       // currently inside an ad break window
+  let adUnmuted = false;     // user chose to hear the current ad break
+  let wasInAd = false;
+  let dateRanges = {};
 
   function setError(msg) { errBox.textContent = 'Error: ' + msg; }
 
@@ -38,21 +85,87 @@
     for (let i = 0; i < tracks.length; i++) tracks[i].mode = 'disabled';
   }
 
+  function applyMute() {
+    video.muted = adBreak ? !adUnmuted : !soundOn;
+  }
+
+  function fmtTime(sec) {
+    if (sec < 60) return sec + 's';
+    const m = Math.floor(sec / 60), s = sec % 60;
+    return s ? m + 'm' + s + 's' : m + 'm';
+  }
+
+  // "now" in program time (what's on screen), falling back to wall clock
+  function programNow() {
+    if (hls && hls.playingDate) return hls.playingDate.getTime();
+    return Date.now();
+  }
+
+  // SCTE-35 segmentation types: 0x22 = Break Start, 0x23 = Break End,
+  // 0x10 = Program Start, 0x11 = Program End. Only 0x22 ranges are ad breaks.
+  function breakWindows() {
+    const out = [];
+    for (const id in dateRanges) {
+      const r = dateRanges[id];
+      if (!r || !r.startDate) continue;
+      const start = r.startDate.getTime();
+      let end;
+      if (r.endDate) end = r.endDate.getTime();
+      else if (r.plannedDuration) end = start + r.plannedDuration * 1000;
+      else end = start + 180000;
+      out.push({ id, start, end, isBreak: id.indexOf('0x22') === 0 });
+    }
+    return out;
+  }
+
+  function evaluateBreak() {
+    const now = programNow();
+    const wins = breakWindows();
+    let inside = false;
+    let activeEnd = null;
+    for (const w of wins) {
+      if (w.isBreak && now >= w.start && now < w.end) { inside = true; activeEnd = w.end; }
+    }
+    adBreak = inside;
+    if (adBreak !== wasInAd) {
+      wasInAd = adBreak;
+      if (adBreak) adUnmuted = false;   // each break starts muted
+    }
+    adctl.classList.toggle('show', adBreak);
+    admute.classList.toggle('unmuted', adUnmuted);
+    if (adBreak) {
+      adcount.textContent = activeEnd != null
+        ? fmtTime(Math.max(0, Math.ceil((activeEnd - now) / 1000)))
+        : '--';
+    }
+    applyMute();
+  }
+
+  function onLevel(data) {
+    if (data && data.details && data.details.dateRanges) {
+      dateRanges = data.details.dateRanges;
+    }
+    evaluateBreak();
+  }
+
   function tryAutoplay() {
     video.muted = true;
     disableSubtitles();
     video.play().catch(() => {});
+    evaluateBreak();
   }
 
   function start() {
     if (window.Hls && Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true });
+      hls = new Hls({ enableWorker: true });
       hls.subtitleDisplay = false;
       hls.subtitleTrack = -1;
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) setError(data.type + ': ' + data.details);
       });
       hls.on(Hls.Events.MANIFEST_PARSED, tryAutoplay);
+      hls.on(Hls.Events.LEVEL_LOADED, (_, data) => onLevel(data));
+      hls.on(Hls.Events.LEVEL_UPDATED, (_, data) => onLevel(data));
       hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, disableSubtitles);
       hls.loadSource(src);
       hls.attachMedia(video);
@@ -66,19 +179,26 @@
     }
   }
 
+  admute.addEventListener('click', (e) => {
+    e.stopPropagation();
+    adUnmuted = !adUnmuted;
+    applyMute();
+    admute.classList.toggle('unmuted', adUnmuted);
+  });
+
   overlay.addEventListener('click', () => {
-    video.muted = false;
+    soundOn = true;
     video.controls = true;
     disableSubtitles();
+    applyMute();
     video.play().catch(() => {});
     overlay.classList.add('hidden');
   });
 
-  if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    start();
-  } else {
-    window.addEventListener('DOMContentLoaded', start);
-  }
+  setInterval(evaluateBreak, 300);
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive') start();
+  else window.addEventListener('DOMContentLoaded', start);
 </script>
 </body>
 </html>
