@@ -145,6 +145,8 @@
   let inAd = false;                   // playback is currently inside a 0x22 break
   let userMuted = true;               // user's own mute preference (normal content)
   let wired = false;                  // analyser wired to the element's audio
+  let outNode = null, cnbcGain = null; // Web Audio output path (lets CNBC exceed 100%)
+  const CNBC_GAIN = 1.5;
   const AD_TICK = 250;
   const ADV_LOOKBACK = 0;             // extra ms to keep muting past planned end
 
@@ -309,6 +311,15 @@
     if (!audioCtx) return;
     if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
     try {
+      // Output path: route the element through a gain so CNBC can exceed 100%.
+      // This replaces the element's own output; muted still silences it.
+      if (!outNode) {
+        outNode = audioCtx.createMediaElementSource(video);
+        cnbcGain = audioCtx.createGain();
+        cnbcGain.gain.value = CNBC_GAIN;
+        outNode.connect(cnbcGain);
+        cnbcGain.connect(audioCtx.destination);
+      }
       let srcNode = null;
       if (video.captureStream) {
         const stream = video.captureStream();
@@ -318,8 +329,7 @@
         }
         srcNode = audioCtx.createMediaStreamSource(stream);
       } else {
-        srcNode = audioCtx.createMediaElementSource(video);
-        srcNode.connect(audioCtx.destination);
+        srcNode = outNode;
       }
       analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
@@ -373,7 +383,7 @@
       if (lofiEl.paused) {
         if (!lofiEl.src) lofiEl.src = LOFI_STREAMS[lofiTry];
         if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
-        lofiEl.volume = video.volume * 0.4;
+        lofiEl.volume = 1;
         lofiEl.play().then(() => {
           wireLofiAnalyser();
         }).catch(() => {
