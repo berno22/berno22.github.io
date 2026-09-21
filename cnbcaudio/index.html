@@ -1346,21 +1346,27 @@ function sqArt(u) {
         const pt = res[0], at = res[1];
         const p = parseVariant(pt, v.uri.slice(0, v.uri.lastIndexOf('/') + 1));
         const aSeqs = at ? parseTimeline(at, audioUri.slice(0, audioUri.lastIndexOf('/') + 1)) : null;
-        // Wall-clock at the audio playhead, via the audio timeline's program dates.
-        let wallMs = null;
+        // Wall-clock at the audio playhead: prefer hls.js's own PDT math ('w'),
+        // fall back to our audio-playlist cumulative mapping ('c').
+        let wallMs = null, wallSrc = 'live';
         const c = window.__cnbcMedia ? window.__cnbcMedia() : null;
-        if (aSeqs && aSeqs.length && c && !isNaN(c.cur) && c.cur > curRef && c.cur < c.end) {
-          let acc = 0;
-          for (let i = 0; i < aSeqs.length; i++) {
-            const s = aSeqs[i];
-            if (c.cur >= acc && c.cur < acc + s.dur) {
-              if (s.pdt !== null) wallMs = s.pdt + (c.cur - acc) * 1000;
-              break;
+        const w = window.__cnbcWall ? window.__cnbcWall() : null;
+        if (c && !isNaN(c.cur) && c.cur > curRef && c.cur < c.end) {
+          if (w !== null) { wallMs = w; wallSrc = 'w'; curRef = c.cur; }
+          else if (aSeqs && aSeqs.length) {
+            let acc = 0;
+            for (let i = 0; i < aSeqs.length; i++) {
+              const s = aSeqs[i];
+              if (c.cur >= acc && c.cur < acc + s.dur) {
+                if (s.pdt !== null) { wallMs = s.pdt + (c.cur - acc) * 1000; wallSrc = 'c'; }
+                break;
+              }
+              acc += s.dur;
             }
-            acc += s.dur;
+            if (wallMs !== null) curRef = c.cur;
           }
-          if (wallMs !== null) curRef = c.cur;
         }
+        window.__stillsDbg = { wallMs: Math.round(wallMs || 0), src: wallSrc, cur: c ? +c.cur.toFixed(2) : null };
         let seg, target = Infinity;
         if (wallMs !== null && p.segs.length) {
           seg = null; let bi = Infinity;
@@ -1407,7 +1413,7 @@ function sqArt(u) {
                 data: segb.slice(s.off, s.off + s.size)
               }));
             }
-            S.info = 'fed ' + r.samples.length + ' chunks Δ' + (wallMs !== null ? Math.round((wallMs - Date.now()) / 1000) + 's' : 'live');
+            S.info = 'fed ' + r.samples.length + ' chunks Δ' + (wallMs !== null ? Math.round((wallMs - Date.now()) / 1000) + 's:' + wallSrc : 'live');
             const guard = new Promise(function (res) { setTimeout(res, 3000); });
             return Promise.race([dec.flush().catch(function (e) { S.lastErr = 'flush:' + (e && e.message); }), guard]);
           });
