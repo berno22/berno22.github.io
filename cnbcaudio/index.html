@@ -1079,7 +1079,9 @@ function sqArt(u) {
   let targetU = Infinity, curRef = 0;
   let lastWallMs = 0, lastFrameWall = 0, lastSrc = 'live', curSegPdt = 0;
   let TRIM = 0;
+  try { TRIM = parseFloat(localStorage.getItem('cnbcTrim') || '0') || 0; } catch (e) {}
   { const m = /[?&]trim=(-?\d+(?:\.\d+)?)/.exec(location.search); if (m) TRIM = parseFloat(m[1]); }
+  window.__cnbcTrim = function (v) { v = parseFloat(v); if (!isNaN(v)) { TRIM = v; try { localStorage.setItem('cnbcTrim', String(v)); } catch (e) {} dbg(); } };
   let gated = true;
   let lastUri = '', failN = 0, latched = null, bestPts = -1, blobUrl = null;
   const cv = document.createElement('canvas');
