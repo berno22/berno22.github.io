@@ -1323,6 +1323,21 @@ function sqArt(u) {
       }
       document.body.classList.add('stills');
       S.on = true; dbg();
+      if (b) {
+        try {
+          const img = new Image();
+          img.onload = function () {
+            try {
+              const cc = document.createElement('canvas'); cc.width = 960; cc.height = 540;
+              const gg = cc.getContext('2d'); gg.drawImage(img, 0, 0);
+              const dd = gg.getImageData(0, 0, 960, 540).data; let s = 0, n = 0;
+              for (let y = 0; y < 540; y += 68) for (let x = 0; x < 960; x += 120) { const i = (y * 960 + x) * 4; s += (dd[i] + dd[i + 1] + dd[i + 2]) / 3; n++; }
+              window.__stillsDbg = window.__stillsDbg || {}; __stillsDbg.blob = Math.round(s / n);
+            } catch (e) {}
+          };
+          img.src = blobUrl;
+        } catch (e) {}
+      }
     }, 'image/jpeg', 0.72);
   }
 
