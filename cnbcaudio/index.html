@@ -51,6 +51,7 @@
   #credits:empty { display: none; }
   #desc { margin: 12px auto 0; color: #83878c; font-size: 12px; line-height: 1.45; max-width: 360px; }
   #desc:empty { display: none; }
+  body.stills #desc { display: none !important; }  /* hide program blurb while live stills show in #art */
   #upnext { margin: 12px auto 0; color: #c9ccce; font-size: 12px; line-height: 1.45; max-width: 360px; }
   @media (max-width: 430px) {
     #card { zoom: 1; padding: 20px 12px; }
@@ -786,7 +787,7 @@ function sqArt(u) {
     lastAdText = '';
     renderAdText();
     cutEl.classList.add('ad');
-    artEl.src = ART_LOGO;
+    if (!document.body.classList.contains('stills')) artEl.src = ART_LOGO;
   }
 
   function renderShow(live) {
@@ -814,7 +815,7 @@ function sqArt(u) {
     const okRaw = raw && tN && (sN.indexOf(tN) === 0 || tN.indexOf(sN) === 0);
     const localArt = okRaw ? (raw.local || null) : null;
     const splashUrl = (okRaw && raw.url) || null;
-    artEl.src = inAd ? ART_LOGO : (splashUrl || ART_LOGO);
+    if (!document.body.classList.contains('stills')) artEl.src = inAd ? ART_LOGO : (splashUrl || ART_LOGO);
     const lockImg = ART_LOGO;
     updateMediaSession(
       'CNBC - ' + (inAd ? adText() : live.title), '',
@@ -995,6 +996,260 @@ function sqArt(u) {
     if ((wantGuide || pendingGuide || tick % 900 === 0) && !guideBusy) { pendingGuide = false; fetchGuide(); }
   }, 4000);
   fetch('art.json').then(r => r.json()).then(m => { for (const k in m) artMap[k] = typeof m[k] === 'string' ? { url: m[k] } : m[k]; }).catch(() => {}).finally(() => fetchGuide());
+</script>
+<script>
+// ---- Drive mode: live video stills in #art via WebCodecs (no <video>). ----
+// Runs entirely in-browser against the CNBC HLS endpoint, so it works from
+// static hosting (GitHub Pages) with no helper anything. Shows through breaks.
+(function () {
+  const artElStills = document.getElementById('art');
+  if (!artElStills || !('VideoDecoder' in window) || !('EncodedVideoChunk' in window)) return;
+  const MASTER = window.MASTER_FALLBACK || 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
+  const TICK = 4000;
+  let busy = false, initBytes = null, tsScale = 10000000, dec = null;
+  let lastUri = '', failN = 0, latched = null, blobUrl = null;
+  const cv = document.createElement('canvas');
+  cv.width = 960; cv.height = 540;
+  const c2 = cv.getContext('2d');
+
+  function dv(data) { return new DataView(data.buffer, data.byteOffset, data.byteLength); }
+
+  function boxes(data, start, end) {
+    const view = dv(data); const out = [];
+    let i = start; end = Math.min(end, data.length);
+    while (i + 8 <= end) {
+      let size = view.getUint32(i);
+      const type = String.fromCharCode(view.getUint8(i + 4), view.getUint8(i + 5), view.getUint8(i + 6), view.getUint8(i + 7));
+      if (size === 1) { size = Number(view.getBigUint64(i + 8)); }
+      else if (size === 0) size = end - i;
+      if (size <= 0 || i + size > end) break;
+      out.push({ type: type, h: i, s: size }); i += size;
+    }
+    return out;
+  }
+
+  function findInit(data) {
+    function walk(start, end) {
+      for (const b of boxes(data, start, end)) {
+        if (b.type === 'moov' || b.type === 'trak' || b.type === 'mdia' || b.type === 'minf' || b.type === 'stbl') {
+          const r = walk(b.h + 8, b.h + b.s); if (r) return r;
+        }
+        if (b.type === 'stsd') {
+          for (const e of boxes(data, b.h + 16, b.h + b.s)) {
+            if (e.type === 'avc1') {
+              const cStart = e.h + 8 + 78;
+              for (const c of boxes(data, cStart, e.h + e.s)) {
+                if (c.type === 'avcC') return data.slice(c.h + 8, c.h + c.s);
+              }
+            }
+          }
+          return null;
+        }
+      }
+      return null;
+    }
+    return walk(0, data.length);
+  }
+
+  function findMdhdTs(data) {
+    const view = dv(data);
+    function walk(start, end) {
+      for (const b of boxes(data, start, end)) {
+        if (b.type === 'moov' || b.type === 'trak' || b.type === 'mdia') {
+          const r = walk(b.h + 8, b.h + b.s); if (r !== null) return r;
+        } else if (b.type === 'mdhd') {
+          const p = b.h + 8;
+          return (view.getUint8(p) === 1) ? view.getUint32(p + 20) : view.getUint32(p + 12);
+        }
+      }
+      return null;
+    }
+    return walk(0, data.length);
+  }
+
+  function parseFragment(data) {
+    const view = dv(data); const samples = []; let firstDec = null;
+    const mdats = boxes(data, 0, data.length).filter(function (b) { return b.type === 'mdat'; });
+    const mdatP = mdats.length ? mdats[0].h + 8 : null;
+    for (const moof of boxes(data, 0, data.length)) {
+      if (moof.type !== 'moof') continue;
+      for (const traf of boxes(data, moof.h + 8, moof.h + moof.s)) {
+        if (traf.type !== 'traf') continue;
+        let tfhd = null, tfdt = null, trun = null;
+        for (const c of boxes(data, traf.h + 8, traf.h + traf.s)) {
+          if (c.type === 'tfhd') tfhd = c;
+          else if (c.type === 'tfdt') tfdt = c;
+          else if (c.type === 'trun') trun = c;
+        }
+        if (!tfhd || !trun) continue;
+        const tfp = tfhd.h + 8;
+        const tfF = view.getUint32(tfp) & 0xffffff;
+        let base = moof.h, p = tfp + 4, defDur = null, defSize = null, defFl = null;
+        if (tfF & 0x1) { base = Number(view.getBigUint64(p)); p += 8; }
+        else if (tfF & 0x10) { base = view.getUint32(p); p += 4; }
+        if (tfF & 0x2) { defDur = view.getUint32(p); p += 4; }
+        if (tfF & 0x4) { defSize = view.getUint32(p); p += 4; }
+        if (tfF & 0x8) { defFl = view.getUint32(p); p += 4; }
+        let decBase = 0;
+        if (tfdt) {
+          const q = tfdt.h + 8;
+          decBase = (view.getUint8(q) === 1) ? Number(view.getBigUint64(q + 4)) : view.getUint32(q + 4);
+        }
+        if (firstDec === null) firstDec = decBase;
+        const trp = trun.h + 8;
+        const trF = view.getUint32(trp) & 0xffffff;
+        const n = view.getUint32(trp + 4);
+        p = trp + 8;
+        let dataOff = 0, firstFl = null;
+        if (trF & 0x1) { dataOff = view.getInt32(p); p += 4; }
+        if (trF & 0x4) { firstFl = view.getUint32(p); p += 4; }
+        let off = base + dataOff;
+        if (off < 0 && mdatP) off = mdatP;
+        let dec = decBase;
+        for (let i = 0; i < n; i++) {
+          let dur = 0;
+          if (trF & 0x100) { dur = view.getUint32(p); p += 4; }
+          else if (tfF & 0x2) dur = defDur;
+          let size = 0;
+          if (trF & 0x200) { size = view.getUint32(p); p += 4; }
+          else if (tfF & 0x4) size = defSize;
+          let fl = 0;
+          if (trF & 0x400) { fl = view.getUint32(p); p += 4; }
+          else if (i === 0 && firstFl !== null) fl = firstFl;
+          else if (tfF & 0x8) fl = defFl;
+          let cts = 0;
+          if (trF & 0x800) { cts = view.getInt32(p); p += 4; }
+          samples.push({ off: off, size: size, dur: dur, fl: fl, dec: dec, cts: cts });
+          off += size; dec += dur;
+        }
+      }
+    }
+    return { samples: samples, firstDec: firstDec };
+  }
+
+  function bump(u) { return u + (u.indexOf('?') < 0 ? '?' : '&') + 'ts=' + Date.now(); }
+  function fetchTxt(u) { return fetch(u, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); }); }
+  function fetchBytes(u) { return fetch(u, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); }); }
+
+  function pickVariant(t, base) {
+    let cur = null, best = null, fb = null;
+    const lines = t.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (/^#EXT-X-STREAM-INF:/.test(line)) { cur = line; continue; }
+      if (cur && line && !line.startsWith('#')) {
+        const res = /RESOLUTION=([0-9]+)x([0-9]+)/.exec(cur);
+        let bw = 0; const bm = /BANDWIDTH=([0-9]+)/.exec(cur); if (bm) bw = parseInt(bm[1], 10);
+        if (res && res[1] === '960' && res[2] === '540') {
+          const o = { uri: new URL(line, base).href, bw: bw };
+          if (/avc1\.64001f/.test(cur)) { if (!best || bw > best.bw) best = o; }
+          else if (!fb || bw > fb.bw) fb = o;
+        }
+        cur = null;
+      }
+    }
+    return best || fb;
+  }
+
+  function parseVariant(t, base) {
+    let init = null, pdt = null, inf = 0; const segs = [];
+    for (const raw of t.split('\n')) {
+      const line = raw.trim();
+      if (line.indexOf('#EXT-X-MAP:') === 0) {
+        const m = /URI="([^"]+)"/.exec(line); if (m) init = new URL(m[1], base).href;
+      } else if (line.indexOf('#EXT-X-PROGRAM-DATE-TIME:') === 0) {
+        const v = Date.parse(line.slice(line.indexOf(':') + 1).trim()); if (!isNaN(v)) pdt = v;
+      } else if (line.indexOf('#EXTINF:') === 0) {
+        const c = line.indexOf(','); const d = line.slice(line.indexOf(':') + 1, c < 0 ? undefined : c);
+        inf = parseFloat(d) || 0;
+      } else if (line && line.charAt(0) !== '#') {
+        segs.push({ uri: new URL(line, base).href, pdt: pdt, dur: inf }); pdt = null; inf = 0;
+      }
+    }
+    return { init: init, segs: segs };
+  }
+
+  // Last fully-written segment (PDT + duration already in the past), else 2nd-to-last.
+  function pickSeg(segs) {
+    if (!segs.length) return null;
+    const now = Date.now() + 2500;
+    for (let i = segs.length - 1; i >= 0; i--) {
+      const s = segs[i];
+      if (s.pdt && s.pdt + s.dur * 1000 <= now) return s;
+    }
+    return segs[segs.length - 2] || segs[segs.length - 1];
+  }
+
+  function ensureDecoder() {
+    if (dec) return true;
+    try {
+      dec = new VideoDecoder({
+        output: function (f) { if (latched) latched.close(); latched = f; },
+        error: function () { dec = null; }
+      });
+      dec.configure({ codec: 'avc1.64001f', description: initBytes, optimizeForLatency: true });
+      return true;
+    } catch (e) { dec = null; return false; }
+  }
+
+  function draw() {
+    if (!latched) return;
+    try { c2.drawImage(latched, 0, 0, 960, 540); } catch (e) {}
+    latched.close(); latched = null;
+    cv.toBlob(function (b) {
+      if (b) { if (blobUrl) URL.revokeObjectURL(blobUrl); blobUrl = URL.createObjectURL(b); artElStills.src = blobUrl; }
+      document.body.classList.add('stills');
+    }, 'image/jpeg', 0.72);
+  }
+
+  function step() {
+    if (busy || document.hidden) return;
+    busy = true;
+    fetchTxt(bump(MASTER)).then(function (mt) {
+      const base = MASTER.slice(0, MASTER.lastIndexOf('/') + 1);
+      const v = pickVariant(mt, base);
+      if (!v) throw new Error('no 960x540 variant');
+      return fetchTxt(bump(v.uri)).then(function (pt) {
+        const p = parseVariant(pt, v.uri.slice(0, v.uri.lastIndexOf('/') + 1));
+        const seg = pickSeg(p.segs);
+        if (!seg) throw new Error('no segments');
+        if (seg.uri === lastUri) return null;
+        const chain = !initBytes ? fetchBytes(p.init).then(function (ib) {
+          initBytes = new Uint8Array(ib);
+          const t = findMdhdTs(initBytes); if (t) tsScale = t;
+          if (!ensureDecoder()) throw new Error('no decoder');
+        }) : Promise.resolve();
+        return chain.then(function () {
+          if (!ensureDecoder()) throw new Error('no decoder');
+          return fetchBytes(seg.uri).then(function (sb) {
+            const segb = new Uint8Array(sb);
+            const r = parseFragment(segb);
+            if (!r.samples.length) throw new Error('no samples');
+            for (const s of r.samples) {
+              dec.decode(new EncodedVideoChunk({
+                type: (s.fl & 0x00010000) === 0 ? 'key' : 'delta',
+                timestamp: Math.max(0, Math.round((s.dec - r.firstDec + (s.cts || 0)) / tsScale * 1e6)),
+                data: segb.slice(s.off, s.off + s.size)
+              }));
+            }
+            return dec.flush().catch(function () {});
+          });
+        }).then(function () {
+          draw();
+          document.body.classList.add('stills');
+          lastUri = seg.uri;
+          failN = 0;
+        });
+      });
+    }).catch(function () {
+      failN++;
+      if (failN >= 8) document.body.classList.remove('stills');
+    }).then(function () { busy = false; });
+  }
+
+  window.setInterval(step, TICK);
+  step();
+})();
 </script>
 </body>
 </html>
