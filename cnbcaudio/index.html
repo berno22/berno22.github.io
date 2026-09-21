@@ -11,6 +11,7 @@
          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
   #wrap { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
           background: #f6f6f4; overflow-y: auto; box-sizing: border-box; }
+  #wrap::after { content: ""; height: 132px; }  /* balances #brand so the card is dead-center */
   #card { position: relative; z-index: 1; text-align: center; padding: 32px; zoom: 1.69;
           margin: auto;
           background: #fff; border: 1px solid rgba(0,0,0,0.08); border-radius: 20px;
@@ -63,8 +64,8 @@
   }
   #upnext:empty { display: none; }
   #adctl {
-    position: relative; z-index: 2; display: flex; align-items: center; justify-content: center;
-    margin: 22px 0 0;
+    position: absolute; z-index: 2; left: 50%; top: calc(100% + 10px);
+    transform: translateX(-50%); display: flex; align-items: center; justify-content: center;
     gap: 4px; padding: 4px; border-radius: 999px;
     background: rgba(163,166,170,0.18); backdrop-filter: blur(6px);
     box-shadow: 0 2px 12px rgba(0,0,0,0.06);
@@ -102,14 +103,14 @@
     <div id="desc"></div>
     <div id="upnext"></div>
     <div id="err"></div>
+    <div id="adctl" role="group" aria-label="Ad break audio">
+      <button class="seg" type="button" data-mode="lofi">LoFi</button>
+      <button class="seg" type="button" data-mode="mute">Mute</button>
+      <button class="seg" type="button" data-mode="ads">Ads</button>
+    </div>
   </div>
   <canvas id="vis"></canvas>
   <video id="video" controls muted playsinline preload="auto"></video>
-  <div id="adctl" role="group" aria-label="Ad break audio">
-    <button class="seg" type="button" data-mode="lofi">LoFi</button>
-    <button class="seg" type="button" data-mode="mute">Mute</button>
-    <button class="seg" type="button" data-mode="ads">Ads</button>
-  </div>
   <audio id="lofi" crossorigin="anonymous" preload="none" playsinline></audio>
 </div>
 <script>
