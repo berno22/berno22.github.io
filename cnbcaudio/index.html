@@ -146,6 +146,7 @@
   let userMuted = true;               // user's own mute preference (normal content)
   let wired = false;                  // analyser wired to the element's audio
   let outNode = null, cnbcGain = null; // Web Audio output path (lets CNBC exceed 100%)
+  let userActivated = false;           // a real gesture happened (safe to route Web Audio)
   const CNBC_GAIN = 1.5;
   const AD_TICK = 250;
   const ADV_LOOKBACK = 0;             // extra ms to keep muting past planned end
@@ -311,15 +312,6 @@
     if (!audioCtx) return;
     if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
     try {
-      // Output path: route the element through a gain so CNBC can exceed 100%.
-      // This replaces the element's own output; muted still silences it.
-      if (!outNode) {
-        outNode = audioCtx.createMediaElementSource(video);
-        cnbcGain = audioCtx.createGain();
-        cnbcGain.gain.value = CNBC_GAIN;
-        outNode.connect(cnbcGain);
-        cnbcGain.connect(audioCtx.destination);
-      }
       let srcNode = null;
       if (video.captureStream) {
         const stream = video.captureStream();
@@ -329,7 +321,8 @@
         }
         srcNode = audioCtx.createMediaStreamSource(stream);
       } else {
-        srcNode = outNode;
+        if (userActivated) enableBoost();
+        srcNode = outNode || audioCtx.createMediaElementSource(video);
       }
       analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
@@ -337,11 +330,38 @@
       srcNode.connect(analyser);
       dataArray = new Uint8Array(analyser.frequencyBinCount);
       wired = true;
+      if (userActivated) enableBoost();
       applyMute();
     } catch (e) {
       analyser = null; wired = false;
     }
   }
+
+  // Route the element through a gain so CNBC can exceed 100%. Enabled only after
+  // a real user gesture, so autoplay never ends up routed through a suspended
+  // (silent) AudioContext. Muted still silences the element/source.
+  function enableBoost() {
+    if (outNode || !audioCtx || !userActivated) return;
+    try {
+      outNode = audioCtx.createMediaElementSource(video);
+      cnbcGain = audioCtx.createGain();
+      cnbcGain.gain.value = CNBC_GAIN;
+      outNode.connect(cnbcGain);
+      cnbcGain.connect(audioCtx.destination);
+      if (analyser && !video.captureStream) outNode.connect(analyser);
+    } catch (e) {
+      outNode = null; cnbcGain = null;
+    }
+  }
+
+  function markActivated() {
+    userActivated = true;
+    ensureCtx();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(enableBoost).catch(() => {});
+    else enableBoost();
+  }
+  document.addEventListener('pointerdown', markActivated, { once: true });
+  document.addEventListener('keydown', markActivated, { once: true });
 
   // Tap the lofi <audio> for its own visualizer (CORS is reflected, so this works).
   function wireLofiAnalyser() {
