@@ -81,6 +81,20 @@
   }
   .seg:hover { color: #7c7f83; }
   .seg.on { background: #a3a6aa; color: #fff; }
+  #gainctl {
+    position: fixed; left: 14px; top: 50%; transform: translateY(-50%);
+    z-index: 15; display: flex; flex-direction: column; align-items: center; gap: 10px;
+    padding: 12px 8px; border-radius: 16px;
+    background: rgba(255,255,255,0.72); border: 1px solid rgba(0,0,0,0.08);
+    box-shadow: 0 4px 18px rgba(0,0,0,0.08); backdrop-filter: blur(6px);
+    user-select: none;
+  }
+  #gainpct { font: 700 11px/1 ui-monospace, Menlo, monospace; color: #62666a; letter-spacing: .5px; }
+  #gainslider {
+    writing-mode: vertical-lr; direction: rtl;
+    -webkit-appearance: slider-vertical; appearance: slider-vertical;
+    height: 160px; margin: 0; accent-color: #a3a6aa; cursor: pointer;
+  }
   #vis {
     position: fixed; left: 0; right: 0; top: 50%; transform: translateY(-50%);
     width: 100%; height: 78vh; z-index: 0; pointer-events: none;
@@ -112,6 +126,10 @@
   <canvas id="vis"></canvas>
   <video id="video" controls muted playsinline preload="auto"></video>
   <audio id="lofi" crossorigin="anonymous" preload="none" playsinline></audio>
+  <div id="gainctl">
+    <div id="gainpct">250%</div>
+    <input id="gainslider" type="range" min="50" max="400" step="5" value="250" aria-label="CNBC volume percent">
+  </div>
 </div>
 <script>
   const video = document.getElementById('video');
@@ -154,6 +172,24 @@
   const CNBC_GAIN = 2.5;
   const AD_TICK = 250;
   const ADV_LOOKBACK = 0;             // extra ms to keep muting past planned end
+
+  // --- car-test gain slider: real-time CNBC boost %, persisted per device ---
+  const gainctl = document.getElementById('gainctl');
+  const gainslider = document.getElementById('gainslider');
+  const gainpct = document.getElementById('gainpct');
+  let gainPct = Math.round(CNBC_GAIN * 100);
+  try {
+    const s = localStorage.getItem('cnbcGainPct');
+    if (s) { const v = parseInt(s, 10); if (v >= 50 && v <= 400) gainPct = v; }
+  } catch (e) {}
+  gainslider.value = gainPct;
+  gainpct.textContent = gainPct + '%';
+  gainslider.addEventListener('input', () => {
+    const p = parseInt(gainslider.value, 10);
+    gainpct.textContent = p + '%';
+    try { localStorage.setItem('cnbcGainPct', String(p)); } catch (e) {}
+    if (cnbcGain && cnbcGain.gain) cnbcGain.gain.value = p / 100;
+  });
 
   // What to play during an ad break: 'lofi' | 'mute' | 'ads' (cached).
   const BREAK_MODES = ['lofi', 'mute', 'ads'];
@@ -355,7 +391,7 @@
       if (!outNode) outNode = audioCtx.createMediaElementSource(video);
       outNode.disconnect();
       cnbcGain = audioCtx.createGain();
-      cnbcGain.gain.value = CNBC_GAIN;
+      cnbcGain.gain.value = gainPct / 100;   // slider % -> gain, honoring the car-test value
       // Limiter so the boost gets louder without clipping/distorting peaks.
       const lim = audioCtx.createDynamicsCompressor();
       lim.threshold.value = -2;
