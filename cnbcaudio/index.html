@@ -22,7 +22,7 @@
   h1:hover { color: #2f3236; }
   #status { display: none; }
   #status:hover { color: #2f3236; }
-  video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  video, #lofi { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   #err { margin: 12px auto 0; color: #e82127; font-size: 12px; white-space: pre-wrap; }
   #err:empty { display: none; }
   #np { display: none; text-align: center; }
@@ -64,21 +64,19 @@
   #adctl {
     position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
     z-index: 20; display: none; align-items: center; justify-content: center;
+    gap: 4px; padding: 4px; border-radius: 999px;
+    background: rgba(163,166,170,0.18); backdrop-filter: blur(6px);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
   }
   #adctl.show { display: flex; }
-  #admute {
-    display: flex; align-items: center; justify-content: center;
-    width: 48px; height: 48px; padding: 0; background: none; border: none;
-    color: #a3a6aa; cursor: pointer; -webkit-tap-highlight-color: transparent;
-    filter: drop-shadow(0 0 3px rgba(255,255,255,0.95)) drop-shadow(0 1px 3px rgba(255,255,255,0.9));
-    transition: transform .15s, opacity .15s;
+  .seg {
+    appearance: none; border: none; background: none; cursor: pointer;
+    color: #a3a6aa; font: 600 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    letter-spacing: .3px; padding: 8px 14px; border-radius: 999px;
+    -webkit-tap-highlight-color: transparent; transition: background .15s, color .15s;
   }
-  #admute:hover { opacity: 0.7; }
-  #admute:active { transform: scale(0.9); }
-  #admute svg { width: 32px; height: 32px; display: block; }
-  #admute .ic-on { display: none; }
-  #admute.unmuted .ic-muted { display: none; }
-  #admute.unmuted .ic-on { display: block; }
+  .seg:hover { color: #7c7f83; }
+  .seg.on { background: #a3a6aa; color: #fff; }
   #vis {
     position: absolute; left: 0; right: 0; bottom: 72px;
     width: 100%; height: 330px; z-index: 0; pointer-events: none;
@@ -104,20 +102,12 @@
   </div>
   <canvas id="vis"></canvas>
   <video id="video" controls muted playsinline preload="auto"></video>
-  <div id="adctl">
-    <button id="admute" type="button" title="Mute / unmute ad" aria-label="Mute or unmute advertisement">
-      <svg class="ic ic-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M11 5 6 9H3v6h3l5 4V5z"/>
-        <line x1="22" y1="9" x2="16" y2="15"/>
-        <line x1="16" y1="9" x2="22" y2="15"/>
-      </svg>
-      <svg class="ic ic-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M11 5 6 9H3v6h3l5 4V5z"/>
-        <path d="M15.5 8.5a5 5 0 0 1 0 7"/>
-        <path d="M18.5 5.5a9 9 0 0 1 0 13"/>
-      </svg>
-    </button>
+  <div id="adctl" role="group" aria-label="Ad break audio">
+    <button class="seg" type="button" data-mode="lofi">LoFi</button>
+    <button class="seg" type="button" data-mode="mute">Mute</button>
+    <button class="seg" type="button" data-mode="ads">Ads</button>
   </div>
+  <audio id="lofi" crossorigin="anonymous" preload="none" playsinline></audio>
 </div>
 <script>
   const video = document.getElementById('video');
@@ -129,7 +119,8 @@
   let mediaMeta = null;
   const errBox = document.getElementById('err');
   const adctl = document.getElementById('adctl');
-  const admute = document.getElementById('admute');
+  const segs = Array.from(document.querySelectorAll('#adctl .seg'));
+  const lofiEl = document.getElementById('lofi');
   const vis = document.getElementById('vis');
   const ctx = vis.getContext('2d');
   let VW = 420, VH = 150;
@@ -152,11 +143,25 @@
   let edgePdt = null;                 // program time of the last segment in the playlist
   let lastSegDur = 0;                 // duration of the last segment (seconds)
   let inAd = false;                   // playback is currently inside a 0x22 break
-  let adOverride = false;             // user chose to hear the current break
   let userMuted = true;               // user's own mute preference (normal content)
   let wired = false;                  // analyser wired to the element's audio
   const AD_TICK = 250;
   const ADV_LOOKBACK = 0;             // extra ms to keep muting past planned end
+
+  // What to play during an ad break: 'lofi' | 'mute' | 'ads' (cached).
+  const BREAK_MODES = ['lofi', 'mute', 'ads'];
+  let breakMode = (function () {
+    try { const m = localStorage.getItem('cnbcBreakMode'); if (BREAK_MODES.indexOf(m) >= 0) return m; } catch (e) {}
+    return 'mute';
+  })();
+  const LOFI_STREAMS = [
+    'https://radio.loficafe.net/listen/chilling/radio.mp3',
+    'https://radio.loficafe.net/listen/sleeping/radio.mp3',
+    'https://radio.loficafe.net/listen/working/radio.mp3',
+    'https://lofi.stream.laut.fm/lofi'
+  ];
+  let lofiTry = 0;
+  let lofiAnalyser = null, lofiData = null, lofiWired = false, lofiTries = 0;
 
   function fetchText(url, ms) {
     const ctl = new AbortController();
@@ -328,9 +333,57 @@
     }
   }
 
+  // Tap the lofi <audio> for its own visualizer (CORS is reflected, so this works).
+  function wireLofiAnalyser() {
+    if (lofiWired || !audioCtx) return;
+    try {
+      let srcNode = null;
+      if (lofiEl.captureStream) {
+        const stream = lofiEl.captureStream();
+        if (!stream.getAudioTracks().length) {
+          if (lofiTries++ < 12) { setTimeout(wireLofiAnalyser, 300); return; }
+          return;
+        }
+        srcNode = audioCtx.createMediaStreamSource(stream);
+      } else {
+        srcNode = audioCtx.createMediaElementSource(lofiEl);
+        srcNode.connect(audioCtx.destination);
+      }
+      lofiAnalyser = audioCtx.createAnalyser();
+      lofiAnalyser.fftSize = 256;
+      lofiAnalyser.smoothingTimeConstant = 0.82;
+      srcNode.connect(lofiAnalyser);
+      lofiData = new Uint8Array(lofiAnalyser.frequencyBinCount);
+      lofiWired = true;
+    } catch (e) {
+      lofiAnalyser = null; lofiWired = false;
+    }
+  }
+
   // silence = user mute, or an ad break the user hasn't chosen to hear
   function applyMute() {
-    video.muted = inAd ? !adOverride : userMuted;
+    if (inAd) video.muted = breakMode !== 'ads';
+    else video.muted = userMuted;
+  }
+
+  // Start/stop the lofi stream to match the current break + mode.
+  function applyBreakAudio() {
+    const want = inAd && breakMode === 'lofi';
+    if (want) {
+      if (lofiEl.paused) {
+        if (!lofiEl.src) lofiEl.src = LOFI_STREAMS[lofiTry];
+        if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+        lofiEl.volume = 1;
+        lofiEl.play().then(() => {
+          wireLofiAnalyser();
+        }).catch(() => {
+          // No gesture yet / autoplay blocked: stay silent for this break.
+          video.muted = true;
+        });
+      }
+    } else if (!lofiEl.paused) {
+      lofiEl.pause();
+    }
   }
 
   function fmtTime(sec) {
@@ -351,13 +404,16 @@
     const midY = VH / 2;
     ctx.clearRect(0, 0, VW, VH);
 
-    if (analyser && dataArray) analyser.getByteFrequencyData(dataArray);
+    const lofiActive = inAd && breakMode === 'lofi';
+    const a = lofiActive ? lofiAnalyser : analyser;
+    const d = lofiActive ? lofiData : dataArray;
+    if (a && d) a.getByteFrequencyData(d);
 
     ctx.globalAlpha = 0.85;
     for (let i = 0; i < N; i++) {
-      if (analyser && dataArray) {
-        const idx = Math.floor(Math.pow(i / N, 1.6) * (dataArray.length * 0.75));
-        tgt[i] = dataArray[idx] / 255;
+      if (a && d) {
+        const idx = Math.floor(Math.pow(i / N, 1.6) * (d.length * 0.75));
+        tgt[i] = d[idx] / 255;
       } else {
         tgt[i] = 0;
       }
@@ -422,10 +478,7 @@
       ensureCtx();
       boot(true);
     } else if (video.paused === false && inAd) {
-      adOverride = !adOverride;
-      applyMute();
-      admute.classList.toggle('unmuted', adOverride);
-      renderBreak();
+      // During a break, audio is controlled only by the LoFi | Mute | Ads selector.
     } else if (video.paused === false && userMuted) {
       userMuted = false;
       video.muted = false;
@@ -453,14 +506,30 @@
   }
   updateMediaSession('CNBC Audio');
 
-  admute.addEventListener('click', (e) => {
-    e.stopPropagation();
-    adOverride = !adOverride;
+  function setBreakMode(mode) {
+    if (BREAK_MODES.indexOf(mode) < 0 || mode === breakMode) return;
+    breakMode = mode;
+    try { localStorage.setItem('cnbcBreakMode', mode); } catch (e) {}
+    syncSegs();
+    ensureCtx();
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
     applyMute();
-    admute.classList.toggle('unmuted', adOverride);
+    applyBreakAudio();
     if (inAd) renderBreak();
+  }
+  function syncSegs() {
+    for (const b of segs) b.classList.toggle('on', b.dataset.mode === breakMode);
+  }
+  for (const b of segs) {
+    b.addEventListener('click', (e) => { e.stopPropagation(); setBreakMode(b.dataset.mode); });
+  }
+  lofiEl.addEventListener('error', () => {
+    if (!inAd || breakMode !== 'lofi' || lofiTry >= LOFI_STREAMS.length - 1) return;
+    lofiTry++;
+    lofiEl.src = LOFI_STREAMS[lofiTry];
+    lofiEl.play().catch(() => {});
   });
+  syncSegs();
 
   function tryAutoplay() {
     if (video.paused === false) {
@@ -587,7 +656,7 @@ function sqArt(u) {
   }
   function adText() {
     const left = breakLeft();
-    return 'Ad break \u00b7 ' + (left != null ? fmtTime(left) : '--') + ' \u00b7 ' + (adOverride ? 'sound on' : 'muted');
+    return 'Ad break \u00b7 ' + (left != null ? fmtTime(left) : '--') + ' \u00b7 ' + breakMode;
   }
   // Drives both the on-page description and the mini-player / lock-screen metadata.
   function renderAdText() {
@@ -789,10 +858,9 @@ function sqArt(u) {
     const now = !!hit;
     if (now !== inAd) {
       inAd = now;
-      if (inAd) adOverride = false;
       applyMute();
+      applyBreakAudio();
       adctl.classList.toggle('show', inAd);
-      admute.classList.toggle('unmuted', adOverride);
       if (inAd) renderBreak();
       else { cutEl.textContent = ''; cutEl.classList.remove('ad'); lastAdText = ''; maybeGuide(); }
     }
