@@ -999,15 +999,37 @@ function sqArt(u) {
 </script>
 <script>
 // ---- Drive mode: live video stills in #art via WebCodecs (no <video>). ----
-// Runs entirely in-browser against the CNBC HLS endpoint, so it works from
-// static hosting (GitHub Pages) with no helper anything. Shows through breaks.
+// Runs entirely in-browser against the CNBC HLS endpoint, self-contained for
+// static hosting. Shows through breaks. ?debug=1 adds a status strip.
 (function () {
   const artElStills = document.getElementById('art');
-  if (!artElStills || !('VideoDecoder' in window) || !('EncodedVideoChunk' in window)) return;
-  const MASTER = window.MASTER_FALLBACK || 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
-  const TICK = 4000;
+  if (!artElStills) return;
+
+  const DBG = /[?&]debug=1/.test(location.search);
+  const S = window.__stillsState = {
+    on: false, supported: 'VideoDecoder' in window && 'EncodedVideoChunk' in window,
+    attempts: 0, okFrames: 0, fails: 0, lastErr: '', info: '', stage: 'boot'
+  };
+  let dbgEl = null;
+  if (DBG) {
+    dbgEl = document.createElement('div');
+    dbgEl.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99;background:#111;color:#9f9;font:10px/1.3 monospace;padding:4px 6px;white-space:pre-wrap;';
+    document.body.appendChild(dbgEl);
+  }
+  function dbg() {
+    if (!DBG) return;
+    dbgEl.textContent =
+      'stills: ' + (S.supported ? 'supported' : 'NO-WebCodecs') +
+      ' | ' + S.stage +
+      ' | frames:' + S.okFrames +
+      ' | fails:' + S.fails +
+      ' | ' + (S.lastErr || '') +
+      ' | ' + (S.info || '');
+  }
+
+  const MASTER = 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
   let busy = false, initBytes = null, tsScale = 10000000, dec = null;
-  let lastUri = '', failN = 0, latched = null, blobUrl = null;
+  let lastUri = '', failN = 0, latched = null, bestPts = -1, blobUrl = null;
   const cv = document.createElement('canvas');
   cv.width = 960; cv.height = 540;
   const c2 = cv.getContext('2d');
@@ -1184,47 +1206,81 @@ function sqArt(u) {
     if (dec) return true;
     try {
       dec = new VideoDecoder({
-        output: function (f) { if (latched) latched.close(); latched = f; },
-        error: function () { dec = null; }
+        output: function (f) {
+          // keep the frame with the highest presentation timestamp
+          if (latched) { if (latched.timestamp > f.timestamp) { f.close(); return; } latched.close(); }
+          latched = f;
+        },
+        error: function (e) { S.lastErr = 'decode:' + (e && e.message); dbg(); dec = null; }
       });
-      dec.configure({ codec: 'avc1.64001f', description: initBytes, optimizeForLatency: true });
+      dec.configure({
+        codec: 'avc1.64001f', description: initBytes,
+        codedWidth: 960, codedHeight: 540, optimizeForLatency: true
+      });
+      S.info = 'decoder configured';
       return true;
-    } catch (e) { dec = null; return false; }
+    } catch (e) {
+      S.lastErr = 'config:' + (e && e.message); dec = null; dbg();
+      return false;
+    }
   }
 
   function draw() {
     if (!latched) return;
-    try { c2.drawImage(latched, 0, 0, 960, 540); } catch (e) {}
-    latched.close(); latched = null;
+    try { c2.drawImage(latched, 0, 0, 960, 540); } catch (e) { S.lastErr = 'draw:' + e; }
+    try { latched.close(); } catch (e) {}
+    latched = null; bestPts = -1;
     cv.toBlob(function (b) {
-      if (b) { if (blobUrl) URL.revokeObjectURL(blobUrl); blobUrl = URL.createObjectURL(b); artElStills.src = blobUrl; }
+      if (b) {
+        try { if (blobUrl) URL.revokeObjectURL(blobUrl); } catch (e) {}
+        blobUrl = URL.createObjectURL(b);
+        artElStills.src = blobUrl;
+        S.okFrames++;
+      }
       document.body.classList.add('stills');
+      S.on = true; dbg();
     }, 'image/jpeg', 0.72);
   }
 
+  function fail(err) {
+    failN++;
+    S.fails = failN;
+    S.lastErr = String((err && (err.message || err.name)) || err).slice(0, 180);
+    if (failN % 3 === 0) { /* backoff handled by schedule */ }
+    dbg();
+  }
+
+  // fetch => parse => decode => draw one segment. Returns true when a new frame drew.
   function step() {
+    if (!S.supported) { S.lastErr = 'WebCodecs unavailable'; dbg(); return; }
     if (busy || document.hidden) return;
     busy = true;
+    S.attempts++; S.stage = 'master';
     fetchTxt(bump(MASTER)).then(function (mt) {
       const base = MASTER.slice(0, MASTER.lastIndexOf('/') + 1);
       const v = pickVariant(mt, base);
       if (!v) throw new Error('no 960x540 variant');
+      S.stage = 'playlist';
       return fetchTxt(bump(v.uri)).then(function (pt) {
         const p = parseVariant(pt, v.uri.slice(0, v.uri.lastIndexOf('/') + 1));
         const seg = pickSeg(p.segs);
         if (!seg) throw new Error('no segments');
-        if (seg.uri === lastUri) return null;
-        const chain = !initBytes ? fetchBytes(p.init).then(function (ib) {
+        if (seg.uri === lastUri) { return false; }
+        const initChain = initBytes ? Promise.resolve() : fetchBytes(p.init).then(function (ib) {
           initBytes = new Uint8Array(ib);
           const t = findMdhdTs(initBytes); if (t) tsScale = t;
-          if (!ensureDecoder()) throw new Error('no decoder');
-        }) : Promise.resolve();
-        return chain.then(function () {
-          if (!ensureDecoder()) throw new Error('no decoder');
+          S.stage = 'decoder';
+          if (!ensureDecoder()) throw new Error('decoder unavailable');
+        });
+        return initChain.then(function () {
+          S.stage = 'segment';
+          if (!ensureDecoder()) throw new Error('decoder unavailable');
           return fetchBytes(seg.uri).then(function (sb) {
             const segb = new Uint8Array(sb);
+            S.stage = 'parse';
             const r = parseFragment(segb);
             if (!r.samples.length) throw new Error('no samples');
+            S.stage = 'decode';
             for (const s of r.samples) {
               dec.decode(new EncodedVideoChunk({
                 type: (s.fl & 0x00010000) === 0 ? 'key' : 'delta',
@@ -1232,23 +1288,33 @@ function sqArt(u) {
                 data: segb.slice(s.off, s.off + s.size)
               }));
             }
-            return dec.flush().catch(function () {});
+            S.info = 'fed ' + r.samples.length + ' chunks';
+            const guard = new Promise(function (res) { setTimeout(res, 3000); });
+            return Promise.race([dec.flush().catch(function (e) { S.lastErr = 'flush:' + (e && e.message); }), guard]);
           });
         }).then(function () {
+          S.stage = 'draw';
           draw();
-          document.body.classList.add('stills');
-          lastUri = seg.uri;
-          failN = 0;
+          if (S.on) {
+            lastUri = seg.uri; failN = 0; S.lastErr = ''; dbg();
+            return true;
+          }
+          return false;
         });
       });
-    }).catch(function () {
-      failN++;
-      if (failN >= 8) document.body.classList.remove('stills');
-    }).then(function () { busy = false; });
+    }).catch(function (e) {
+      fail(e);
+    }).then(function (ok) {
+      busy = false;
+      S.stage = 'idle';
+      // reschedule with backoff: 4s on success, 12s..90s while failing
+      const baseDelay = ok ? 4000 : Math.min(90000, Math.pow(2, Math.min(failN, 6)) * 4000);
+      setTimeout(function () { if (!document.hidden) step(); }, S.on ? 4000 : baseDelay);
+    });
   }
 
-  window.setInterval(step, TICK);
-  step();
+  if (S.supported) step();
+  else dbg();
 })();
 </script>
 </body>
