@@ -17,6 +17,19 @@
   #err { position: absolute; top: 8px; left: 8px; right: 8px; color: #f66;
          font: 12px system-ui; white-space: pre-wrap; z-index: 20; }
   #err:empty { display: none; }
+  #gotolive {
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    z-index: 25; cursor: pointer;
+    color: #fff; font: 700 13px/1 system-ui; letter-spacing: 1px; text-transform: uppercase;
+    padding: 10px 22px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(0,0,0,0.45); backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    transition: background .18s ease, transform .12s ease;
+  }
+  #gotolive:hover { background: rgba(255,255,255,0.22); }
+  #gotolive:active { transform: translateX(-50%) scale(0.95); }
+  #gotolive.hidden { display: none; }
   #adctl {
     position: absolute; left: 18px; top: 50%; transform: translateY(-50%) scale(0.96);
     z-index: 15; display: none; flex-direction: column; align-items: center; gap: 8px;
@@ -54,6 +67,7 @@
 <div id="wrap">
   <video id="video" muted playsinline preload="auto"></video>
   <div id="overlay">Tap for sound</div>
+  <button id="gotolive" class="hidden">Go LIVE</button>
   <div id="err"></div>
   <div id="adctl">
     <button class="seg" type="button" data-mode="lofi">LoFi</button>
@@ -126,6 +140,21 @@
   }
   window.addEventListener('pointerdown', markActivated);
   window.addEventListener('keydown', markActivated);
+
+  // "Go LIVE" button: jumps to the live edge when paused, then resumes playback.
+  const gotolive = document.getElementById('gotolive');
+  let started = false;
+  function goLive() {
+    if (hls) hls.startLoad(-1);               // hls.js: resume from live edge
+    else if (video.seekable && video.seekable.length) {
+      video.currentTime = video.seekable.end(video.seekable.length - 1);
+    }
+    video.play().catch(() => {});
+    gotolive.classList.add('hidden');
+  }
+  gotolive.addEventListener('click', goLive);
+  video.addEventListener('play', () => gotolive.classList.add('hidden'));
+  video.addEventListener('pause', () => { if (started) gotolive.classList.remove('hidden'); });
 
   function applyBreakAudio() {
     if (adBreak && breakMode === 'lofi') {
@@ -201,6 +230,7 @@
   }
 
   function tryAutoplay() {
+    started = true;
     video.muted = true;
     disableSubtitles();
     video.play().catch(() => {});
