@@ -1382,6 +1382,7 @@ function sqArt(u) {
         }
         targetU = target;
         if (!seg) throw new Error('no segments');
+        if (wallMs === null) return false;  // never show a live-edge frame that leads the audio; hold splash/last frame
         if (seg.uri === lastUri) { return false; }
         const initChain = initBytes ? Promise.resolve() : fetchBytes(p.init).then(function (ib) {
           initBytes = new Uint8Array(ib);
