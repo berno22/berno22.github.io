@@ -145,12 +145,25 @@
   const gotolive = document.getElementById('gotolive');
   let started = false;
   function goLive() {
-    if (hls) hls.startLoad(-1);               // hls.js: resume from live edge
-    else if (video.seekable && video.seekable.length) {
-      video.currentTime = video.seekable.end(video.seekable.length - 1);
-    }
-    video.play().catch(() => {});
     gotolive.classList.add('hidden');
+    if (!hls) {
+      // Native path: seek to the end of the live window and resume.
+      if (video.seekable && video.seekable.length) {
+        video.currentTime = video.seekable.end(video.seekable.length - 1);
+      }
+      video.play().catch(() => {});
+      return;
+    }
+    // hls.js: resume loading from the live edge, then snap the playback
+    // position to the edge so we truly jump to "latest", not just unpause.
+    hls.startLoad(-1);
+    const toEdge = () => {
+      const t = hls.liveSyncPosition;
+      if (t != null && isFinite(t)) video.currentTime = t;
+      video.play().catch(() => {});
+    };
+    setTimeout(toEdge, 120);
+    setTimeout(() => video.play().catch(() => {}), 450);
   }
   gotolive.addEventListener('click', goLive);
   video.addEventListener('play', () => gotolive.classList.add('hidden'));
