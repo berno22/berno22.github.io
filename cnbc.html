@@ -18,26 +18,36 @@
          font: 12px system-ui; white-space: pre-wrap; z-index: 20; }
   #err:empty { display: none; }
   #adctl {
-    position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
-    z-index: 15; display: none; flex-direction: column; align-items: center; gap: 6px;
+    position: absolute; left: 18px; top: 50%; transform: translateY(-50%) scale(0.96);
+    z-index: 15; display: none; flex-direction: column; align-items: center; gap: 8px;
+    padding: 8px 6px; border-radius: 20px;
+    background: linear-gradient(180deg, rgba(36,38,43,0.55), rgba(20,22,26,0.55));
+    backdrop-filter: blur(16px) saturate(1.2);
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
+    visibility: hidden; opacity: 0; pointer-events: none;
+    transition: opacity .22s ease, transform .22s ease, visibility .22s;
   }
-  #adctl.show { display: flex; }
-  #admute {
-    display: flex; align-items: center; justify-content: center;
-    width: 48px; height: 48px; padding: 0; background: none; border: none;
-    color: #fff; cursor: pointer; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.95));
-    transition: transform .15s, opacity .15s;
+  #adctl.show { display: flex; visibility: visible; opacity: 1; transform: translateY(-50%) scale(1); pointer-events: auto; }
+  .seg {
+    appearance: none; border: none; background: transparent; cursor: pointer;
+    color: #b9bbbf; font: 600 12px/1 system-ui;
+    letter-spacing: .4px; padding: 9px 18px; border-radius: 999px; min-width: 58px;
+    -webkit-tap-highlight-color: transparent;
+    transition: background .18s ease, color .18s ease, transform .12s ease;
   }
-  #admute:active { transform: scale(0.9); }
-  #admute svg { width: 32px; height: 32px; display: block; }
+  .seg:hover { color: #fff; }
+  .seg:active { transform: scale(0.94); }
+  .seg.on {
+    background: #fff; color: #111; font-weight: 700;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+  }
   #adcount {
-    color: #fff; font: 600 12px/1 ui-monospace, Menlo, monospace; letter-spacing: .5px;
-    padding: 3px 8px; border-radius: 999px; background: rgba(0,0,0,0.5);
-    filter: drop-shadow(0 1px 3px rgba(0,0,0,0.9));
+    color: #e6e6e7; font: 600 11px/1 ui-monospace, Menlo, monospace; letter-spacing: 1px;
+    padding: 4px 10px; border-radius: 999px; margin-top: 2px;
+    background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.07);
   }
-  #admute .ic-on { display: none; }
-  #admute.unmuted .ic-muted { display: none; }
-  #admute.unmuted .ic-on { display: block; }
 </style>
 </head>
 <body>
@@ -46,34 +56,35 @@
   <div id="overlay">Tap for sound</div>
   <div id="err"></div>
   <div id="adctl">
-    <button id="admute" title="Mute / unmute ad" aria-label="Mute or unmute ad">
-      <svg class="ic ic-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M11 5 6 9H3v6h3l5 4V5z"/>
-        <line x1="22" y1="9" x2="16" y2="15"/>
-        <line x1="16" y1="9" x2="22" y2="15"/>
-      </svg>
-      <svg class="ic ic-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M11 5 6 9H3v6h3l5 4V5z"/>
-        <path d="M15.5 8.5a5 5 0 0 1 0 7"/>
-        <path d="M18.5 5.5a9 9 0 0 1 0 13"/>
-      </svg>
-    </button>
+    <button class="seg" type="button" data-mode="lofi">LoFi</button>
+    <button class="seg" type="button" data-mode="mute">Mute</button>
+    <button class="seg" type="button" data-mode="ads">Ads</button>
     <div id="adcount">--</div>
   </div>
+  <audio id="lofi" crossorigin="anonymous" preload="none" playsinline></audio>
 </div>
 <script>
   const video = document.getElementById('video');
   const overlay = document.getElementById('overlay');
   const errBox = document.getElementById('err');
   const adctl = document.getElementById('adctl');
-  const admute = document.getElementById('admute');
+  const segs = Array.from(document.querySelectorAll('#adctl .seg'));
+  const lofiEl = document.getElementById('lofi');
   const adcount = document.getElementById('adcount');
+  const LOFI = ['https://radio.loficafe.net/listen/chilling/radio.mp3',
+                'https://radio.loficafe.net/listen/sleeping/radio.mp3',
+                'https://radio.loficafe.net/listen/working/radio.mp3',
+                'https://laut.fm/lofi'];
   const src = 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
 
   let hls = null;
   let soundOn = false;       // user tapped for sound
   let adBreak = false;       // currently inside an ad break window
-  let adUnmuted = false;     // user chose to hear the current ad break
+  let breakMode = 'lofi';    // what to do during breaks: mute, lofi, ads
+  try {
+    const saved = localStorage.getItem('cnbcBreakMode');
+    if (saved && ['lofi', 'mute', 'ads'].indexOf(saved) >= 0) breakMode = saved;
+  } catch (e) {}
   let wasInAd = false;
   let dateRanges = {};
 
@@ -86,7 +97,24 @@
   }
 
   function applyMute() {
-    video.muted = adBreak ? !adUnmuted : !soundOn;
+    video.muted = adBreak ? breakMode !== 'ads' : !soundOn;
+  }
+
+  function applyBreakAudio() {
+    if (adBreak && breakMode === 'lofi') {
+      if (!lofiEl.src) { lofiEl.volume = 0.7; lofiEl.src = LOFI[0]; }
+      if (lofiEl.paused) lofiEl.play().catch(() => {});
+    } else if (!lofiEl.paused) {
+      lofiEl.pause();
+    }
+  }
+
+  function setBreakMode(m) {
+    breakMode = m;
+    try { localStorage.setItem('cnbcBreakMode', m); } catch (e) {}
+    for (const s of segs) s.classList.toggle('on', s.dataset.mode === m);
+    applyBreakAudio();
+    applyMute();
   }
 
   function fmtTime(sec) {
@@ -127,12 +155,9 @@
       if (w.isBreak && now >= w.start && now < w.end) { inside = true; activeEnd = w.end; }
     }
     adBreak = inside;
-    if (adBreak !== wasInAd) {
-      wasInAd = adBreak;
-      if (adBreak) adUnmuted = false;   // each break starts muted
-    }
+    if (adBreak !== wasInAd) wasInAd = adBreak;
     adctl.classList.toggle('show', adBreak);
-    admute.classList.toggle('unmuted', adUnmuted);
+    applyBreakAudio();
     if (adBreak) {
       adcount.textContent = activeEnd != null
         ? fmtTime(Math.max(0, Math.ceil((activeEnd - now) / 1000)))
@@ -179,12 +204,10 @@
     }
   }
 
-  admute.addEventListener('click', (e) => {
-    e.stopPropagation();
-    adUnmuted = !adUnmuted;
-    applyMute();
-    admute.classList.toggle('unmuted', adUnmuted);
-  });
+  for (const s of segs) {
+    s.addEventListener('click', (e) => { e.stopPropagation(); setBreakMode(s.dataset.mode); });
+  }
+  setBreakMode(breakMode);
 
   overlay.addEventListener('click', () => {
     soundOn = true;
