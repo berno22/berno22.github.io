@@ -100,6 +100,33 @@
     video.muted = adBreak ? breakMode !== 'ads' : !soundOn;
   }
 
+  // 150% TV-audio boost, routed through Web Audio only after a real user
+  // gesture so autoplay never gets caught in a suspended AudioContext.
+  let boostActivated = false;
+  function enableBoost() {
+    if (boostActivated || !window.AudioContext) return;
+    boostActivated = true;
+    try {
+      const ctx = new AudioContext();
+      const media = ctx.createMediaElementSource(video);
+      const gain = ctx.createGain();
+      gain.gain.value = 1.5;
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -2; limiter.knee.value = 0; limiter.ratio.value = 20;
+      limiter.attack.value = 0.003; limiter.release.value = 0.25;
+      media.connect(gain); gain.connect(limiter); limiter.connect(ctx.destination);
+      ctx.resume().catch(() => {});
+    } catch (e) {}
+  }
+  function markActivated() {
+    if (boostActivated) return;
+    enableBoost();
+    window.removeEventListener('pointerdown', markActivated);
+    window.removeEventListener('keydown', markActivated);
+  }
+  window.addEventListener('pointerdown', markActivated);
+  window.addEventListener('keydown', markActivated);
+
   function applyBreakAudio() {
     if (adBreak && breakMode === 'lofi') {
       if (!lofiEl.src) { lofiEl.volume = 0.7; lofiEl.src = LOFI[0]; }
