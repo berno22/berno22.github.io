@@ -147,7 +147,7 @@
   let wired = false;                  // analyser wired to the element's audio
   let outNode = null, cnbcGain = null; // Web Audio output path (lets CNBC exceed 100%)
   let userActivated = false;           // a real gesture happened (safe to route Web Audio)
-  const CNBC_GAIN = 1.5;
+  const CNBC_GAIN = 2.5;
   const AD_TICK = 250;
   const ADV_LOOKBACK = 0;             // extra ms to keep muting past planned end
 
@@ -346,8 +346,16 @@
       outNode = audioCtx.createMediaElementSource(video);
       cnbcGain = audioCtx.createGain();
       cnbcGain.gain.value = CNBC_GAIN;
+      // Limiter so the boost gets louder without clipping/distorting peaks.
+      const lim = audioCtx.createDynamicsCompressor();
+      lim.threshold.value = -2;
+      lim.knee.value = 0;
+      lim.ratio.value = 20;
+      lim.attack.value = 0.003;
+      lim.release.value = 0.25;
       outNode.connect(cnbcGain);
-      cnbcGain.connect(audioCtx.destination);
+      cnbcGain.connect(lim);
+      lim.connect(audioCtx.destination);
       if (analyser && !video.captureStream) outNode.connect(analyser);
     } catch (e) {
       outNode = null; cnbcGain = null;
