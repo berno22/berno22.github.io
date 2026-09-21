@@ -23,7 +23,7 @@
   h1:hover { color: #2f3236; }
   #status { display: none; }
   #status:hover { color: #2f3236; }
-  video, #lofi { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   #err { margin: 12px auto 0; color: #e82127; font-size: 12px; white-space: pre-wrap; }
   #err:empty { display: none; }
   #np { display: none; text-align: center; }
@@ -81,23 +81,6 @@
   }
   .seg:hover { color: #7c7f83; }
   .seg.on { background: #a3a6aa; color: #fff; }
-  #gainctl {
-    position: fixed; left: 14px; top: 50%; transform: translateY(-50%);
-    z-index: 15; display: flex; align-items: center; gap: 8px;
-    padding: 12px 10px; border-radius: 16px;
-    background: rgba(255,255,255,0.72); border: 1px solid rgba(0,0,0,0.08);
-    box-shadow: 0 4px 18px rgba(0,0,0,0.08); backdrop-filter: blur(6px);
-    user-select: none;
-  }
-  .gcol { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-  .gdiv { width: 1px; height: 132px; background: rgba(0,0,0,0.10); }
-  #gainpct, #lofipct { font: 700 11px/1 ui-monospace, Menlo, monospace; color: #62666a; letter-spacing: .5px; }
-  .glabel { font: 600 9px/1 system-ui; letter-spacing: 1.2px; text-transform: uppercase; color: #83878c; }
-  #gainslider, #lofislider {
-    writing-mode: vertical-lr; direction: rtl;
-    -webkit-appearance: slider-vertical; appearance: slider-vertical;
-    height: 132px; margin: 0; accent-color: #a3a6aa; cursor: pointer;
-  }
   #vis {
     position: fixed; left: 0; right: 0; top: 50%; transform: translateY(-50%);
     width: 100%; height: 78vh; z-index: 0; pointer-events: none;
@@ -121,27 +104,12 @@
     <div id="upnext"></div>
     <div id="err"></div>
     <div id="adctl" role="group" aria-label="Ad break audio">
-      <button class="seg" type="button" data-mode="lofi">LoFi</button>
       <button class="seg" type="button" data-mode="mute">Mute</button>
       <button class="seg" type="button" data-mode="ads">Ads</button>
     </div>
   </div>
   <canvas id="vis"></canvas>
   <video id="video" controls muted playsinline preload="auto"></video>
-  <audio id="lofi" crossorigin="anonymous" preload="none" playsinline></audio>
-  <div id="gainctl">
-    <div class="gcol">
-      <input id="gainslider" type="range" min="50" max="800" step="5" value="800" aria-label="CNBC volume percent">
-      <div id="gainpct">800%</div>
-      <div class="glabel">CNBC</div>
-    </div>
-    <div class="gdiv"></div>
-    <div class="gcol">
-      <input id="lofislider" type="range" min="0" max="100" step="5" value="40" aria-label="LoFi volume percent">
-      <div id="lofipct">40%</div>
-      <div class="glabel">LoFi</div>
-    </div>
-  </div>
 </div>
 <script>
   const video = document.getElementById('video');
@@ -154,7 +122,6 @@
   const errBox = document.getElementById('err');
   const adctl = document.getElementById('adctl');
   const segs = Array.from(document.querySelectorAll('#adctl .seg'));
-  const lofiEl = document.getElementById('lofi');
   const vis = document.getElementById('vis');
   const ctx = vis.getContext('2d');
   let VW = 420, VH = 150;
@@ -185,45 +152,12 @@
   const AD_TICK = 250;
   const ADV_LOOKBACK = 0;             // extra ms to keep muting past planned end
 
-  // --- car-test gain slider: real-time CNBC boost % (always starts at 800%) ---
-  const gainctl = document.getElementById('gainctl');
-  const gainslider = document.getElementById('gainslider');
-  const gainpct = document.getElementById('gainpct');
-  let gainPct = Math.round(CNBC_GAIN * 100);
-  gainslider.value = gainPct;
-  gainpct.textContent = gainPct + '%';
-  gainslider.addEventListener('input', () => {
-    const p = parseInt(gainslider.value, 10);
-    gainpct.textContent = p + '%';
-    if (cnbcGain && cnbcGain.gain) cnbcGain.gain.value = p / 100;
-  });
-
-  // --- car-test LoFi slider (always starts at 40%) ---
-  const lofislider = document.getElementById('lofislider');
-  const lofipct = document.getElementById('lofipct');
-  let lofiPct = 40;
-  lofislider.value = lofiPct;
-  lofipct.textContent = lofiPct + '%';
-  lofislider.addEventListener('input', () => {
-    const p = parseInt(lofislider.value, 10);
-    lofipct.textContent = p + '%';
-    lofiEl.volume = p / 100;
-  });
-
-  // What to play during an ad break: 'lofi' | 'mute' | 'ads' (cached).
-  const BREAK_MODES = ['lofi', 'mute', 'ads'];
+  // What to do during an ad break: 'mute' | 'ads' (cached).
+  const BREAK_MODES = ['mute', 'ads'];
   let breakMode = (function () {
     try { const m = localStorage.getItem('cnbcBreakMode'); if (BREAK_MODES.indexOf(m) >= 0) return m; } catch (e) {}
-    return 'lofi';
+    return 'mute';
   })();
-  const LOFI_STREAMS = [
-    'https://radio.loficafe.net/listen/chilling/radio.mp3',
-    'https://radio.loficafe.net/listen/sleeping/radio.mp3',
-    'https://radio.loficafe.net/listen/working/radio.mp3',
-    'https://lofi.stream.laut.fm/lofi'
-  ];
-  let lofiTry = 0;
-  let lofiAnalyser = null, lofiData = null, lofiWired = false, lofiTries = 0;
 
   function fetchText(url, ms) {
     const ctl = new AbortController();
@@ -410,7 +344,7 @@
       if (!outNode) outNode = audioCtx.createMediaElementSource(video);
       outNode.disconnect();
       cnbcGain = audioCtx.createGain();
-      cnbcGain.gain.value = gainPct / 100;   // slider % -> gain, honoring the car-test value
+      cnbcGain.gain.value = CNBC_GAIN;
       // Limiter so the boost gets louder without clipping/distorting peaks.
       const lim = audioCtx.createDynamicsCompressor();
       lim.threshold.value = -2;
@@ -437,57 +371,11 @@
   document.addEventListener('pointerdown', markActivated, { once: true });
   document.addEventListener('keydown', markActivated, { once: true });
 
-  // Tap the lofi <audio> for its own visualizer (CORS is reflected, so this works).
-  function wireLofiAnalyser() {
-    if (lofiWired || !audioCtx) return;
-    try {
-      let srcNode = null;
-      if (lofiEl.captureStream) {
-        const stream = lofiEl.captureStream();
-        if (!stream.getAudioTracks().length) {
-          if (lofiTries++ < 12) { setTimeout(wireLofiAnalyser, 300); return; }
-          return;
-        }
-        srcNode = audioCtx.createMediaStreamSource(stream);
-      } else {
-        srcNode = audioCtx.createMediaElementSource(lofiEl);
-        srcNode.connect(audioCtx.destination);
-      }
-      lofiAnalyser = audioCtx.createAnalyser();
-      lofiAnalyser.fftSize = 256;
-      lofiAnalyser.smoothingTimeConstant = 0.82;
-      srcNode.connect(lofiAnalyser);
-      lofiData = new Uint8Array(lofiAnalyser.frequencyBinCount);
-      lofiWired = true;
-    } catch (e) {
-      lofiAnalyser = null; lofiWired = false;
-    }
-  }
-
-  // silence = user mute, or an ad break the user hasn't chosen to hear
+  // silence = user mute, or an ad break the user hasn't chosen to hear.
+  // The CNBC stream is never stopped or swapped on breaks - only muted.
   function applyMute() {
     if (inAd) video.muted = breakMode !== 'ads';
     else video.muted = userMuted;
-  }
-
-  // Start/stop the lofi stream to match the current break + mode.
-  function applyBreakAudio() {
-    const want = inAd && breakMode === 'lofi';
-    if (want) {
-      if (lofiEl.paused) {
-        if (!lofiEl.src) lofiEl.src = LOFI_STREAMS[lofiTry];
-        if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
-        lofiEl.volume = lofiPct / 100;
-        lofiEl.play().then(() => {
-          wireLofiAnalyser();
-        }).catch(() => {
-          // No gesture yet / autoplay blocked: stay silent for this break.
-          video.muted = true;
-        });
-      }
-    } else if (!lofiEl.paused) {
-      lofiEl.pause();
-    }
   }
 
   function fmtTime(sec) {
@@ -508,9 +396,8 @@
     const midY = VH / 2;
     ctx.clearRect(0, 0, VW, VH);
 
-    const lofiActive = inAd && breakMode === 'lofi';
-    const a = lofiActive ? lofiAnalyser : analyser;
-    const d = lofiActive ? lofiData : dataArray;
+    const a = analyser;
+    const d = dataArray;
     if (a && d) a.getByteFrequencyData(d);
 
     ctx.globalAlpha = 0.85;
@@ -582,7 +469,7 @@
       ensureCtx();
       boot(true);
     } else if (video.paused === false && inAd) {
-      // During a break, audio is controlled only by the LoFi | Mute | Ads selector.
+      // During a break, CNBC stays playing; only Mute | Ads controls the sound.
     } else if (video.paused === false && userMuted) {
       userMuted = false;
       video.muted = false;
@@ -618,7 +505,6 @@
     ensureCtx();
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
     applyMute();
-    applyBreakAudio();
     if (inAd) renderBreak();
   }
   function syncSegs() {
@@ -627,12 +513,6 @@
   for (const b of segs) {
     b.addEventListener('click', (e) => { e.stopPropagation(); setBreakMode(b.dataset.mode); });
   }
-  lofiEl.addEventListener('error', () => {
-    if (!inAd || breakMode !== 'lofi' || lofiTry >= LOFI_STREAMS.length - 1) return;
-    lofiTry++;
-    lofiEl.src = LOFI_STREAMS[lofiTry];
-    lofiEl.play().catch(() => {});
-  });
   syncSegs();
 
   function tryAutoplay() {
@@ -758,7 +638,7 @@ function sqArt(u) {
     }
     return null;
   }
-  const BREAK_LABELS = { lofi: 'LoFi', mute: 'Mute', ads: 'Ads' };
+  const BREAK_LABELS = { mute: 'Mute', ads: 'Ads' };
   function adText() {
     const left = breakLeft();
     return 'Ad break \u00b7 ' + (left != null ? fmtTime(left) : '--') + ' \u00b7 ' + (BREAK_LABELS[breakMode] || breakMode);
@@ -964,7 +844,6 @@ function sqArt(u) {
     if (now !== inAd) {
       inAd = now;
       applyMute();
-      applyBreakAudio();
       adctl.classList.toggle('show', inAd);
       if (inAd) renderBreak();
       else { cutEl.textContent = ''; cutEl.classList.remove('ad'); lastAdText = ''; maybeGuide(); }
