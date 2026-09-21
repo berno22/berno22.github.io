@@ -65,9 +65,9 @@
   }
   #upnext:empty { display: none; }
   #adctl {
-    position: absolute; z-index: 2; left: 50%; top: calc(100% + 30px);
-    transform: translateX(-50%); display: flex; align-items: center; justify-content: center;
-    gap: 4px; padding: 4px; border-radius: 999px;
+    display: flex; align-items: center; justify-content: center; width: fit-content;
+    gap: 4px; padding: 4px; margin: 14px auto 0;
+    border-radius: 999px;
     background: rgba(140,143,148,0.32); backdrop-filter: blur(6px);
     box-shadow: 0 2px 12px rgba(0,0,0,0.08);
     visibility: hidden; opacity: 0; pointer-events: none;
@@ -120,12 +120,12 @@
     <div id="credits"></div>
     <div id="desc"></div>
     <div id="upnext"></div>
-    <div id="err"></div>
     <div id="adctl" role="group" aria-label="Ad break audio">
       <button class="seg" type="button" data-mode="lofi">LoFi</button>
       <button class="seg" type="button" data-mode="mute">Mute</button>
       <button class="seg" type="button" data-mode="ads">Ads</button>
     </div>
+    <div id="err"></div>
   </div>
   <canvas id="vis"></canvas>
   <video id="video" controls muted playsinline preload="auto"></video>
