@@ -131,14 +131,14 @@
   <audio id="lofi" crossorigin="anonymous" preload="none" playsinline></audio>
   <div id="gainctl">
     <div class="gcol">
-      <input id="gainslider" type="range" min="50" max="800" step="5" value="250" aria-label="CNBC volume percent">
-      <div id="gainpct">250%</div>
+      <input id="gainslider" type="range" min="50" max="800" step="5" value="800" aria-label="CNBC volume percent">
+      <div id="gainpct">800%</div>
       <div class="glabel">CNBC</div>
     </div>
     <div class="gdiv"></div>
     <div class="gcol">
-      <input id="lofislider" type="range" min="0" max="100" step="5" value="70" aria-label="LoFi volume percent">
-      <div id="lofipct">70%</div>
+      <input id="lofislider" type="range" min="0" max="100" step="5" value="40" aria-label="LoFi volume percent">
+      <div id="lofipct">40%</div>
       <div class="glabel">LoFi</div>
     </div>
   </div>
@@ -181,42 +181,32 @@
   let wired = false;                  // analyser wired to the element's audio
   let outNode = null, cnbcGain = null; // Web Audio output path (lets CNBC exceed 100%)
   let userActivated = false;           // a real gesture happened (safe to route Web Audio)
-  const CNBC_GAIN = 2.5;
+  const CNBC_GAIN = 8.0;   // always 800%
   const AD_TICK = 250;
   const ADV_LOOKBACK = 0;             // extra ms to keep muting past planned end
 
-  // --- car-test gain slider: real-time CNBC boost %, persisted per device ---
+  // --- car-test gain slider: real-time CNBC boost % (always starts at 800%) ---
   const gainctl = document.getElementById('gainctl');
   const gainslider = document.getElementById('gainslider');
   const gainpct = document.getElementById('gainpct');
   let gainPct = Math.round(CNBC_GAIN * 100);
-  try {
-    const s = localStorage.getItem('cnbcGainPct');
-    if (s) { const v = parseInt(s, 10); if (v >= 50 && v <= 800) gainPct = v; }
-  } catch (e) {}
   gainslider.value = gainPct;
   gainpct.textContent = gainPct + '%';
   gainslider.addEventListener('input', () => {
     const p = parseInt(gainslider.value, 10);
     gainpct.textContent = p + '%';
-    try { localStorage.setItem('cnbcGainPct', String(p)); } catch (e) {}
     if (cnbcGain && cnbcGain.gain) cnbcGain.gain.value = p / 100;
   });
 
-  // --- car-test LoFi slider ---
+  // --- car-test LoFi slider (always starts at 40%) ---
   const lofislider = document.getElementById('lofislider');
   const lofipct = document.getElementById('lofipct');
-  let lofiPct = 70;
-  try {
-    const s = localStorage.getItem('cnbcLoFiPct');
-    if (s) { const v = parseInt(s, 10); if (v >= 0 && v <= 100) lofiPct = v; }
-  } catch (e) {}
+  let lofiPct = 40;
   lofislider.value = lofiPct;
   lofipct.textContent = lofiPct + '%';
   lofislider.addEventListener('input', () => {
     const p = parseInt(lofislider.value, 10);
     lofipct.textContent = p + '%';
-    try { localStorage.setItem('cnbcLoFiPct', String(p)); } catch (e) {}
     lofiEl.volume = p / 100;
   });
 
