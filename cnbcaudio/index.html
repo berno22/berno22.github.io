@@ -739,9 +739,10 @@ function sqArt(u) {
     }
     return null;
   }
+  const BREAK_LABELS = { lofi: 'LoFi', mute: 'Mute', ads: 'Ads' };
   function adText() {
     const left = breakLeft();
-    return 'Ad break \u00b7 ' + (left != null ? fmtTime(left) : '--') + ' \u00b7 ' + breakMode;
+    return 'Ad break \u00b7 ' + (left != null ? fmtTime(left) : '--') + ' \u00b7 ' + (BREAK_LABELS[breakMode] || breakMode);
   }
   // Drives both the on-page description and the mini-player / lock-screen metadata.
   function renderAdText() {
