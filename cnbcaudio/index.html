@@ -1211,11 +1211,11 @@ function sqArt(u) {
           if (latched) { if (latched.timestamp > f.timestamp) { f.close(); return; } latched.close(); }
           latched = f;
         },
-        error: function (e) { S.lastErr = 'decode:' + (e && e.message); dbg(); dec = null; }
+        error: function (e) { S.lastErr = 'decode:' + (e && e.message); dec = null; initBytes = null; dbg(); }
       });
       dec.configure({
         codec: 'avc1.64001f', description: initBytes,
-        codedWidth: 960, codedHeight: 540, optimizeForLatency: true
+        codedWidth: 960, codedHeight: 540
       });
       S.info = 'decoder configured';
       return true;
@@ -1281,10 +1281,16 @@ function sqArt(u) {
             const r = parseFragment(segb);
             if (!r.samples.length) throw new Error('no samples');
             S.stage = 'decode';
+            let tPrev = -1;
             for (const s of r.samples) {
+              if (!dec) { S.lastErr = 'decoder-lost:' + (S.lastErr || 'unexpected'); initBytes = null; throw new Error(S.lastErr); }
+              let ts = Math.round((s.dec - r.firstDec + (s.cts || 0)) / tsScale * 1e6);
+              if (ts < 0) ts = 0;
+              if (ts <= tPrev) ts = tPrev + 1;
+              tPrev = ts;
               dec.decode(new EncodedVideoChunk({
                 type: (s.fl & 0x00010000) === 0 ? 'key' : 'delta',
-                timestamp: Math.max(0, Math.round((s.dec - r.firstDec + (s.cts || 0)) / tsScale * 1e6)),
+                timestamp: ts,
                 data: segb.slice(s.off, s.off + s.size)
               }));
             }
