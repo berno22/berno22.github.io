@@ -166,8 +166,23 @@
     setTimeout(() => video.play().catch(() => {}), 450);
   }
   gotolive.addEventListener('click', goLive);
-  video.addEventListener('play', () => gotolive.classList.add('hidden'));
-  video.addEventListener('pause', () => { if (started) gotolive.classList.remove('hidden'); });
+
+  // Show "Go LIVE" whenever the player is paused OR playing behind the live edge.
+  const LIVE_MARGIN_S = 5;
+  function updateGoLive() {
+    let show = false;
+    if (started) {
+      if (video.paused) {
+        show = true;
+      } else if (hls && hls.liveSyncPosition != null) {
+        show = (hls.liveSyncPosition - video.currentTime) > LIVE_MARGIN_S;
+      } else if (video.seekable && video.seekable.length) {
+        show = (video.seekable.end(video.seekable.length - 1) - video.currentTime) > LIVE_MARGIN_S;
+      }
+    }
+    gotolive.classList.toggle('hidden', !show);
+  }
+  setInterval(updateGoLive, 1500);
 
   function applyBreakAudio() {
     if (adBreak && breakMode === 'lofi') {
