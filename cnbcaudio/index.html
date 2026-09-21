@@ -1078,6 +1078,8 @@ function sqArt(u) {
   let busy = false, initBytes = null, avcC = null, tsScale = 10000000, dec = null;
   let targetU = Infinity, curRef = 0;
   let lastWallMs = 0, lastFrameWall = 0, lastSrc = 'live', curSegPdt = 0;
+  let TRIM = 0;
+  { const m = /[?&]trim=(-?\d+(?:\.\d+)?)/.exec(location.search); if (m) TRIM = parseFloat(m[1]); }
   let gated = true;
   let lastUri = '', failN = 0, latched = null, bestPts = -1, blobUrl = null;
   const cv = document.createElement('canvas');
@@ -1354,13 +1356,13 @@ function sqArt(u) {
         const c = window.__cnbcMedia ? window.__cnbcMedia() : null;
         const w = window.__cnbcWall ? window.__cnbcWall() : null;
         if (c && !isNaN(c.cur) && c.cur > curRef && c.cur < c.end) {
-          if (w !== null) { wallMs = w; wallSrc = 'w'; curRef = c.cur; }
+          if (w !== null) { wallMs = w - TRIM * 1000; wallSrc = 'w'; curRef = c.cur; }
           else if (aSeqs && aSeqs.length) {
             let acc = 0;
             for (let i = 0; i < aSeqs.length; i++) {
               const s = aSeqs[i];
               if (c.cur >= acc && c.cur < acc + s.dur) {
-                if (s.pdt !== null) { wallMs = s.pdt + (c.cur - acc) * 1000; wallSrc = 'c'; }
+                if (s.pdt !== null) { wallMs = s.pdt + (c.cur - acc) * 1000 - TRIM * 1000; wallSrc = 'c'; }
                 break;
               }
               acc += s.dur;
@@ -1373,6 +1375,7 @@ function sqArt(u) {
           frameWall: Math.round(lastFrameWall || 0),
           dts: Math.round(Date.now() - lastFrameWall),
           src: wallMs !== null ? wallSrc : lastSrc,
+          trim: TRIM,
           cur: c ? +c.cur.toFixed(2) : null
         };
         let seg, target = Infinity;
@@ -1423,7 +1426,7 @@ function sqArt(u) {
                 data: segb.slice(s.off, s.off + s.size)
               }));
             }
-            S.info = 'fed ' + r.samples.length + ' chunks Δ' + (wallMs !== null ? Math.round((wallMs - Date.now()) / 1000) + 's:' + wallSrc : 'live') + ' fΔ' + Math.round((Date.now() - (lastFrameWall || Date.now())) / 1000) + 's';
+            S.info = 'fed ' + r.samples.length + ' chunks Δ' + (wallMs !== null ? Math.round((wallMs - Date.now()) / 1000) + 's:' + wallSrc : 'live') + ' fΔ' + Math.round((Date.now() - (lastFrameWall || Date.now())) / 1000) + 's' + (TRIM ? ' t' + TRIM : '');
             const guard = new Promise(function (res) { setTimeout(res, 3000); });
             return Promise.race([dec.flush().catch(function (e) { S.lastErr = 'flush:' + (e && e.message); }), guard]);
           });
