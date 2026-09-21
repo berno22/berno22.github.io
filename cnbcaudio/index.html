@@ -225,7 +225,7 @@
   const gainctl = document.getElementById('gainctl');
   const gainslider = document.getElementById('gainslider');
   const gainpct = document.getElementById('gainpct');
-  let gainPct = Math.round(CNBC_GAIN * 100);
+  let gainPct = 600;
   try {
     const s = localStorage.getItem('cnbcGainPct');
     if (s) { const v = parseInt(s, 10); if (v >= 50 && v <= 800) gainPct = v; }
@@ -1206,90 +1206,6 @@ function sqArt(u) {
   function bump(u) { return u + (u.indexOf('?') < 0 ? '?' : '&') + 'ts=' + Date.now(); }
   function fetchTxt(u) { return fetch(u, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); }); }
   function fetchBytes(u) { return fetch(u, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); }); }
-  function fetchRange(u, s, e) {
-    return fetch(u, { cache: 'no-store', headers: { Range: 'bytes=' + s + '-' + (e - 1) } }).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.arrayBuffer();
-    });
-  }
-
-  // Byte layout of the top-level boxes until the first moof (assumes moof-then-mdat).
-  function probeMoof(data) {
-    const view = dv(data); let pos = 0;
-    while (pos + 8 <= data.length) {
-      let sz = view.getUint32(pos);
-      const typ = String.fromCharCode(view.getUint8(pos + 4), view.getUint8(pos + 5), view.getUint8(pos + 6), view.getUint8(pos + 7));
-      if (sz === 1) { sz = Number(view.getBigUint64(pos + 8)); }
-      else if (sz === 0) sz = data.length - pos;
-      if (sz <= 0) return 0;
-      if (typ === 'moof') return pos + sz;
-      if (typ === 'mdat') return 0;
-      pos += sz;
-    }
-    return 0;
-  }
-
-  // Fetch only the moof (for sample offsets) plus the key..target byte range of a
-  // segment: roughly a keyframe instead of the whole 4s file. Falls back to the full
-  // body if the server ignores Range or if moof layout is unexpected.
-  function fetchSeg(seg, targetU) {
-    const SEG_KB = 1565; // ~4s x 3.13 Mbps reference
-    function pick(r0) {
-      let to = -1, toTs = -1;
-      for (let i = 0; i < r0.samples.length; i++) {
-        const s = r0.samples[i];
-        const t = Math.round((s.dec - r0.firstDec + (s.cts || 0)) / tsScale * 1e6);
-        if (t <= targetU && (to < 0 || t > toTs)) { to = i; toTs = t; }
-      }
-      if (to < 0) to = 0;
-      let from = 0;
-      for (let i = 0; i < r0.samples.length; i++) { if ((r0.samples[i].fl & 0x00010000) === 0) { from = i; break; } }
-      if (to < from) to = from;
-      return { from: from, to: to };
-    }
-    function plan(moofEnd, probe, payloadStart) {
-      const parseBuf = new Uint8Array(moofEnd + 16);
-      parseBuf.set(probe.subarray(0, moofEnd), 0);
-      const w = dv(parseBuf);
-      w.setUint32(moofEnd, 16);
-      parseBuf[moofEnd + 4] = 109; parseBuf[moofEnd + 5] = 100; parseBuf[moofEnd + 6] = 97; parseBuf[moofEnd + 7] = 116; // 'mdat'
-      const r0 = parseFragment(parseBuf);
-      if (!r0.samples.length) throw new Error('no samples in moof');
-      const pr = pick(r0);
-      const sF = r0.samples[pr.from], sT = r0.samples[pr.to];
-      const start = sF.off, end = sT.off + sT.size;
-      if (!(end > start)) throw new Error('empty byte range');
-      const want = end - start;
-      return fetchRange(seg.uri, start, end).then(function (ab) {
-        const buf = new Uint8Array(ab);
-        let pstart = start;
-        if (buf.length !== want) {
-          if (buf.length < end) throw new Error('short bytes ' + buf.length + '/' + end);
-          pstart = 0; // server returned the whole body
-        }
-        return { r0: r0, from: pr.from, to: pr.to, start: pstart, payload: buf, kb: Math.round(want / 1024), pct: Math.round(want / 1024 / SEG_KB * 100) };
-      });
-    }
-    function serveFull(full) {
-      const r0 = parseFragment(full);
-      if (!r0.samples.length) throw new Error('no samples in full');
-      const pr = pick(r0);
-      return { r0: r0, from: pr.from, to: pr.to, start: 0, payload: full, kb: Math.round(full.length / 1024), pct: Math.round(full.length / 1024 / SEG_KB * 100) };
-    }
-    const PROBE = 8192;
-    return fetchRange(seg.uri, 0, PROBE).then(function (ab) {
-      const first = new Uint8Array(ab);
-      const moofEnd = probeMoof(first);
-      if (!moofEnd) return fetchBytes(seg.uri).then(function (fb) { return serveFull(new Uint8Array(fb)); });
-      const need = moofEnd + 64;
-      if (first.length >= need) return plan(moofEnd, first, 0);
-      return fetchRange(seg.uri, 0, need).then(function (b) {
-        const second = new Uint8Array(b);
-        if (second.length < need) throw new Error('short moof probe');
-        return plan(moofEnd, second, 0);
-      });
-    });
-  }
 
   function pickVariant(t, base) {
     let cur = null, best = null, fb = null;
@@ -1493,29 +1409,26 @@ function sqArt(u) {
         return initChain.then(function () {
           S.stage = 'segment';
           if (!ensureDecoder()) throw new Error('decoder unavailable');
-          return fetchSeg(seg, targetU).then(function (f) {
+          return fetchBytes(seg.uri).then(function (sb) {
+            const segb = new Uint8Array(sb);
             S.stage = 'parse';
-            const r0 = f.r0;
-            if (f.from < 0 || f.to >= r0.samples.length || f.from > f.to) throw new Error('bad sample range');
+            const r = parseFragment(segb);
+            if (!r.samples.length) throw new Error('no samples');
             S.stage = 'decode';
-            let tPrev = -1, fed = 0;
-            for (let j = f.from; j <= f.to; j++) {
-              const s = r0.samples[j];
+            let tPrev = -1;
+            for (const s of r.samples) {
               if (!dec) { S.lastErr = 'decoder-lost:' + (S.lastErr || 'unexpected'); initBytes = null; throw new Error(S.lastErr); }
-              let ts = Math.round((s.dec - r0.firstDec + (s.cts || 0)) / tsScale * 1e6);
+              let ts = Math.round((s.dec - r.firstDec + (s.cts || 0)) / tsScale * 1e6);
               if (ts < 0) ts = 0;
               if (ts <= tPrev) ts = tPrev + 1;
               tPrev = ts;
-              const doff = s.off - f.start;
-              if (doff < 0 || doff + s.size > f.payload.length) throw new Error('sample beyond fetched range');
               dec.decode(new EncodedVideoChunk({
                 type: (s.fl & 0x00010000) === 0 ? 'key' : 'delta',
                 timestamp: ts,
-                data: f.payload.subarray(doff, doff + s.size)
+                data: segb.slice(s.off, s.off + s.size)
               }));
-              fed++;
             }
-            S.info = 'fed ' + fed + '/' + r0.samples.length + ' d' + f.kb + 'K(' + f.pct + '%)' + ' Δ' + (wallMs !== null ? Math.round((wallMs - Date.now()) / 1000) + 's:' + wallSrc : 'live') + ' fΔ' + Math.round((Date.now() - (lastFrameWall || Date.now())) / 1000) + 's' + (TRIM ? ' t' + TRIM : '');
+            S.info = 'fed ' + r.samples.length + ' chunks Δ' + (wallMs !== null ? Math.round((wallMs - Date.now()) / 1000) + 's:' + wallSrc : 'live') + ' fΔ' + Math.round((Date.now() - (lastFrameWall || Date.now())) / 1000) + 's' + (TRIM ? ' t' + TRIM : '');
             const guard = new Promise(function (res) { setTimeout(res, 3000); });
             return Promise.race([dec.flush().catch(function (e) { S.lastErr = 'flush:' + (e && e.message); }), guard]);
           });
