@@ -63,8 +63,8 @@
   }
   #upnext:empty { display: none; }
   #adctl {
-    position: relative; z-index: 2; display: flex; align-items: flex-start; justify-content: center;
-    margin: 22px 0 0; min-height: 74px;
+    position: relative; z-index: 2; display: flex; align-items: center; justify-content: center;
+    margin: 22px 0 0;
     gap: 4px; padding: 4px; border-radius: 999px;
     background: rgba(163,166,170,0.18); backdrop-filter: blur(6px);
     box-shadow: 0 2px 12px rgba(0,0,0,0.06);
@@ -414,7 +414,7 @@
       if (lofiEl.paused) {
         if (!lofiEl.src) lofiEl.src = LOFI_STREAMS[lofiTry];
         if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
-        lofiEl.volume = 1;
+        lofiEl.volume = 0.7;
         lofiEl.play().then(() => {
           wireLofiAnalyser();
         }).catch(() => {
