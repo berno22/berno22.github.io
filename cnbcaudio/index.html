@@ -104,6 +104,7 @@
   const title = document.getElementById('title');
   const status = document.getElementById('status');
   const artEl = document.getElementById('art');
+  const card = document.getElementById('card');
   const ART_LOGO = 'art/logo.png';
   const LOGO_SIZE = '1024x1024';
   let mediaMeta = null;
@@ -403,8 +404,10 @@
       userMuted = false;
       video.muted = false;
       ensureCtx();
+      const go = () => { wireAnalyser(); applyMute(); };
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(go).catch(go);
+      else go();
       setStatus('Live');
-      applyMute();
     } else if (video.paused === false) {
       sessionStorage.setItem('cnbcClickReload', '1');
       refresh();
@@ -412,11 +415,16 @@
       started = true;
       ensureCtx();
       playWithRetry();
+    } else {
+      // stream stopped while muted: restart it fresh (from tap, so it's unmuted)
+      started = false;
+      userMuted = false;
+      video.muted = false;
+      ensureCtx();
+      boot(true);
     }
   }
-  title.addEventListener('click', togglePlay);
-  status.addEventListener('click', togglePlay);
-  artEl.addEventListener('click', togglePlay);
+  card.addEventListener('click', togglePlay);
   if (navigator.mediaSession) {
     try {
       navigator.mediaSession.setActionHandler('play', () => { if (video.paused) togglePlay(); });
