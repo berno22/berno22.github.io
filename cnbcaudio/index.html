@@ -373,7 +373,7 @@
       if (lofiEl.paused) {
         if (!lofiEl.src) lofiEl.src = LOFI_STREAMS[lofiTry];
         if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
-        lofiEl.volume = 0.7;
+        lofiEl.volume = video.volume * 0.5;
         lofiEl.play().then(() => {
           wireLofiAnalyser();
         }).catch(() => {
