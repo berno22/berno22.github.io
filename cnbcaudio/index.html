@@ -1267,14 +1267,14 @@ function sqArt(u) {
           if (buf.length < end) throw new Error('short bytes ' + buf.length + '/' + end);
           pstart = 0; // server returned the whole body
         }
-        return { r0: r0, from: pr.from, to: pr.to, start: pstart, payload: buf, kb: want, pct: Math.round(want / 1024 / SEG_KB * 100) };
+        return { r0: r0, from: pr.from, to: pr.to, start: pstart, payload: buf, kb: Math.round(want / 1024), pct: Math.round(want / 1024 / SEG_KB * 100) };
       });
     }
     function serveFull(full) {
       const r0 = parseFragment(full);
       if (!r0.samples.length) throw new Error('no samples in full');
       const pr = pick(r0);
-      return { r0: r0, from: pr.from, to: pr.to, start: 0, payload: full, kb: full.length, pct: Math.round(full.length / 1024 / SEG_KB * 100) };
+      return { r0: r0, from: pr.from, to: pr.to, start: 0, payload: full, kb: Math.round(full.length / 1024), pct: Math.round(full.length / 1024 / SEG_KB * 100) };
     }
     const PROBE = 8192;
     return fetchRange(seg.uri, 0, PROBE).then(function (ab) {
