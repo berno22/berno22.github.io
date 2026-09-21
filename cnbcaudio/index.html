@@ -1028,7 +1028,7 @@ function sqArt(u) {
   }
 
   const MASTER = 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
-  let busy = false, initBytes = null, tsScale = 10000000, dec = null;
+  let busy = false, initBytes = null, avcC = null, tsScale = 10000000, dec = null;
   let lastUri = '', failN = 0, latched = null, bestPts = -1, blobUrl = null;
   const cv = document.createElement('canvas');
   cv.width = 960; cv.height = 540;
@@ -1211,10 +1211,10 @@ function sqArt(u) {
           if (latched) { if (latched.timestamp > f.timestamp) { f.close(); return; } latched.close(); }
           latched = f;
         },
-        error: function (e) { S.lastErr = 'decode:' + (e && e.message); dec = null; initBytes = null; dbg(); }
+        error: function (e) { S.lastErr = 'decode:' + (e && e.message); dec = null; initBytes = null; avcC = null; dbg(); }
       });
       dec.configure({
-        codec: 'avc1.64001f', description: initBytes,
+        codec: 'avc1.64001f', description: avcC,
         codedWidth: 960, codedHeight: 540
       });
       S.info = 'decoder configured';
@@ -1268,6 +1268,8 @@ function sqArt(u) {
         if (seg.uri === lastUri) { return false; }
         const initChain = initBytes ? Promise.resolve() : fetchBytes(p.init).then(function (ib) {
           initBytes = new Uint8Array(ib);
+          avcC = findInit(initBytes);
+          if (!avcC) throw new Error('no avcC in init');
           const t = findMdhdTs(initBytes); if (t) tsScale = t;
           S.stage = 'decoder';
           if (!ensureDecoder()) throw new Error('decoder unavailable');
