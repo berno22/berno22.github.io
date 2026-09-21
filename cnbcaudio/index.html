@@ -152,7 +152,7 @@
   const BREAK_MODES = ['lofi', 'mute', 'ads'];
   let breakMode = (function () {
     try { const m = localStorage.getItem('cnbcBreakMode'); if (BREAK_MODES.indexOf(m) >= 0) return m; } catch (e) {}
-    return 'mute';
+    return 'lofi';
   })();
   const LOFI_STREAMS = [
     'https://radio.loficafe.net/listen/chilling/radio.mp3',
