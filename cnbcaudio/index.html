@@ -630,14 +630,13 @@
   }
 
   function togglePlay() {
+    boostAtStart();   // one-time: force 600% boost and start live stills on the first click
     if (!started) {
-      boostAtStart();
       ensureCtx();
       boot(true);
     } else if (video.paused === false && inAd) {
       // During a break, audio is controlled only by the LoFi | Mute | Ads selector.
     } else if (video.paused === false && userMuted) {
-      boostAtStart();
       userMuted = false;
       video.muted = false;
       ensureCtx();
