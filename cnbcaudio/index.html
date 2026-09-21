@@ -160,7 +160,7 @@
   let inAd = false;                   // playback is currently inside a 0x22 break
   let adOverride = false;             // user chose to hear the current break
   let userMuted = true;               // user's own mute preference (normal content)
-  let gain = null, wired = false;     // Web Audio output gain (keeps analyser on real audio)
+  let wired = false;                  // analyser wired to the element's audio
   const AD_TICK = 250;
   const ADV_LOOKBACK = 0;             // extra ms to keep muting past planned end
 
@@ -300,16 +300,28 @@
     }
   }
 
-  // Web Audio output path: element -> gain -> destination, with the analyser
-  // tapped straight off the element so it always sees REAL audio, even while an
-  // ad is silenced by pulling the gain to 0.
+  // Tap the element's own audio for the visualizer via captureStream(). Per spec
+  // the capture keeps producing real samples even while the element is muted, so
+  // the bars stay live during ad-break muting; the element still plays the sound.
+  let wireTries = 0;
   function wireAnalyser() {
-    if (wired || !audioCtx || !started) return;
+    if (wired || !started) return;
+    ensureCtx();
+    if (!audioCtx) return;
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
     try {
-      const srcNode = audioCtx.createMediaElementSource(video);
-      gain = audioCtx.createGain();
-      srcNode.connect(gain);
-      gain.connect(audioCtx.destination);
+      let srcNode = null;
+      if (video.captureStream) {
+        const stream = video.captureStream();
+        if (!stream.getAudioTracks().length) {
+          if (wireTries++ < 12) { setTimeout(wireAnalyser, 300); return; }
+          return;
+        }
+        srcNode = audioCtx.createMediaStreamSource(stream);
+      } else {
+        srcNode = audioCtx.createMediaElementSource(video);
+        srcNode.connect(audioCtx.destination);
+      }
       analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.82;
@@ -318,15 +330,13 @@
       wired = true;
       applyMute();
     } catch (e) {
-      analyser = null; gain = null; wired = false;
+      analyser = null; wired = false;
     }
   }
 
   // silence = user mute, or an ad break the user hasn't chosen to hear
   function applyMute() {
-    const silent = inAd ? !adOverride : userMuted;
-    if (gain) gain.gain.value = silent ? 0 : 1;
-    else video.muted = silent;
+    video.muted = inAd ? !adOverride : userMuted;
   }
 
   function fmtTime(sec) {
@@ -450,8 +460,9 @@
       userMuted = false;
       video.muted = false;
       ensureCtx();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => { wireAnalyser(); applyMute(); });
+      else { wireAnalyser(); applyMute(); }
       setStatus('Live');
-      applyMute();
     } else if (video.paused === false) {
       sessionStorage.setItem('cnbcClickReload', '1');
       refresh();
@@ -475,6 +486,7 @@
   admute.addEventListener('click', (e) => {
     e.stopPropagation();
     adOverride = !adOverride;
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
     applyMute();
     admute.classList.toggle('unmuted', adOverride);
     if (inAd) renderBreak();
