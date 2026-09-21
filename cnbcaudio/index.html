@@ -83,17 +83,20 @@
   .seg.on { background: #a3a6aa; color: #fff; }
   #gainctl {
     position: fixed; left: 14px; top: 50%; transform: translateY(-50%);
-    z-index: 15; display: flex; flex-direction: column; align-items: center; gap: 10px;
-    padding: 12px 8px; border-radius: 16px;
+    z-index: 15; display: flex; align-items: center; gap: 8px;
+    padding: 12px 10px; border-radius: 16px;
     background: rgba(255,255,255,0.72); border: 1px solid rgba(0,0,0,0.08);
     box-shadow: 0 4px 18px rgba(0,0,0,0.08); backdrop-filter: blur(6px);
     user-select: none;
   }
-  #gainpct { font: 700 11px/1 ui-monospace, Menlo, monospace; color: #62666a; letter-spacing: .5px; }
-  #gainslider {
+  .gcol { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .gdiv { width: 1px; height: 132px; background: rgba(0,0,0,0.10); }
+  #gainpct, #lofipct { font: 700 11px/1 ui-monospace, Menlo, monospace; color: #62666a; letter-spacing: .5px; }
+  .glabel { font: 600 9px/1 system-ui; letter-spacing: 1.2px; text-transform: uppercase; color: #83878c; }
+  #gainslider, #lofislider {
     writing-mode: vertical-lr; direction: rtl;
     -webkit-appearance: slider-vertical; appearance: slider-vertical;
-    height: 160px; margin: 0; accent-color: #a3a6aa; cursor: pointer;
+    height: 132px; margin: 0; accent-color: #a3a6aa; cursor: pointer;
   }
   #vis {
     position: fixed; left: 0; right: 0; top: 50%; transform: translateY(-50%);
@@ -127,8 +130,17 @@
   <video id="video" controls muted playsinline preload="auto"></video>
   <audio id="lofi" crossorigin="anonymous" preload="none" playsinline></audio>
   <div id="gainctl">
-    <div id="gainpct">250%</div>
-    <input id="gainslider" type="range" min="50" max="400" step="5" value="250" aria-label="CNBC volume percent">
+    <div class="gcol">
+      <input id="gainslider" type="range" min="50" max="400" step="5" value="250" aria-label="CNBC volume percent">
+      <div id="gainpct">250%</div>
+      <div class="glabel">CNBC</div>
+    </div>
+    <div class="gdiv"></div>
+    <div class="gcol">
+      <input id="lofislider" type="range" min="0" max="100" step="5" value="70" aria-label="LoFi volume percent">
+      <div id="lofipct">70%</div>
+      <div class="glabel">LoFi</div>
+    </div>
   </div>
 </div>
 <script>
@@ -189,6 +201,23 @@
     gainpct.textContent = p + '%';
     try { localStorage.setItem('cnbcGainPct', String(p)); } catch (e) {}
     if (cnbcGain && cnbcGain.gain) cnbcGain.gain.value = p / 100;
+  });
+
+  // --- car-test LoFi slider ---
+  const lofislider = document.getElementById('lofislider');
+  const lofipct = document.getElementById('lofipct');
+  let lofiPct = 70;
+  try {
+    const s = localStorage.getItem('cnbcLoFiPct');
+    if (s) { const v = parseInt(s, 10); if (v >= 0 && v <= 100) lofiPct = v; }
+  } catch (e) {}
+  lofislider.value = lofiPct;
+  lofipct.textContent = lofiPct + '%';
+  lofislider.addEventListener('input', () => {
+    const p = parseInt(lofislider.value, 10);
+    lofipct.textContent = p + '%';
+    try { localStorage.setItem('cnbcLoFiPct', String(p)); } catch (e) {}
+    lofiEl.volume = p / 100;
   });
 
   // What to play during an ad break: 'lofi' | 'mute' | 'ads' (cached).
@@ -458,7 +487,7 @@
       if (lofiEl.paused) {
         if (!lofiEl.src) lofiEl.src = LOFI_STREAMS[lofiTry];
         if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
-        lofiEl.volume = 0.7;
+        lofiEl.volume = lofiPct / 100;
         lofiEl.play().then(() => {
           wireLofiAnalyser();
         }).catch(() => {
