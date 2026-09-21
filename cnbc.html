@@ -6,29 +6,101 @@
 <title>CNBC Stream</title>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 <style>
-  body { margin: 0; background: #000; }
+  body { margin: 0; background: #000; color: #eee; font: 14px system-ui; }
   #wrap { position: fixed; inset: 0; }
   video { width: 100%; height: 100%; background: #000; }
   #overlay {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.55); color: #fff; font: 16px system-ui; cursor: pointer; z-index: 10;
+    background: rgba(0,0,0,0.55); color: #fff; font: 20px system-ui; cursor: pointer; z-index: 10;
   }
   #overlay.hidden { display: none; }
   #err { position: absolute; top: 8px; left: 8px; right: 8px; color: #f66;
          font: 12px system-ui; white-space: pre-wrap; z-index: 20; }
+  #err:empty { display: none; }
+  #gotolive {
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    z-index: 25; cursor: pointer;
+    color: #fff; font: 700 13px/1 system-ui; letter-spacing: 1px; text-transform: uppercase;
+    padding: 10px 22px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(0,0,0,0.45); backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    transition: background .18s ease, transform .12s ease;
+  }
+  #gotolive:hover { background: rgba(255,255,255,0.22); }
+  #gotolive:active { transform: translateX(-50%) scale(0.95); }
+  #gotolive.hidden { display: none; }
+  #adctl {
+    position: absolute; left: 18px; top: 50%; transform: translateY(-50%) scale(0.96);
+    z-index: 15; display: none; flex-direction: column; align-items: center; gap: 8px;
+    padding: 8px 6px; border-radius: 20px;
+    background: linear-gradient(180deg, rgba(36,38,43,0.55), rgba(20,22,26,0.55));
+    backdrop-filter: blur(16px) saturate(1.2);
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
+    visibility: hidden; opacity: 0; pointer-events: none;
+    transition: opacity .22s ease, transform .22s ease, visibility .22s;
+  }
+  #adctl.show { display: flex; visibility: visible; opacity: 1; transform: translateY(-50%) scale(1); pointer-events: auto; }
+  .seg {
+    appearance: none; border: none; background: transparent; cursor: pointer;
+    color: #b9bbbf; font: 600 12px/1 system-ui;
+    letter-spacing: .4px; padding: 9px 18px; border-radius: 999px; min-width: 58px;
+    -webkit-tap-highlight-color: transparent;
+    transition: background .18s ease, color .18s ease, transform .12s ease;
+  }
+  .seg:hover { color: #fff; }
+  .seg:active { transform: scale(0.94); }
+  .seg.on {
+    background: #fff; color: #111; font-weight: 700;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+  }
+  #adcount {
+    color: #e6e6e7; font: 600 11px/1 ui-monospace, Menlo, monospace; letter-spacing: 1px;
+    padding: 4px 10px; border-radius: 999px; margin-top: 2px;
+    background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.07);
+  }
 </style>
 </head>
 <body>
 <div id="wrap">
   <video id="video" muted playsinline preload="auto"></video>
   <div id="overlay">Tap for sound</div>
+  <button id="gotolive" class="hidden">Go LIVE</button>
   <div id="err"></div>
+  <div id="adctl">
+    <button class="seg" type="button" data-mode="lofi">LoFi</button>
+    <button class="seg" type="button" data-mode="mute">Mute</button>
+    <button class="seg" type="button" data-mode="ads">Ads</button>
+    <div id="adcount">--</div>
+  </div>
+  <audio id="lofi" crossorigin="anonymous" preload="none" playsinline></audio>
 </div>
 <script>
   const video = document.getElementById('video');
   const overlay = document.getElementById('overlay');
   const errBox = document.getElementById('err');
+  const adctl = document.getElementById('adctl');
+  const segs = Array.from(document.querySelectorAll('#adctl .seg'));
+  const lofiEl = document.getElementById('lofi');
+  const adcount = document.getElementById('adcount');
+  const LOFI = ['https://radio.loficafe.net/listen/chilling/radio.mp3',
+                'https://radio.loficafe.net/listen/sleeping/radio.mp3',
+                'https://radio.loficafe.net/listen/working/radio.mp3',
+                'https://laut.fm/lofi'];
   const src = 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
+
+  let hls = null;
+  let soundOn = false;       // user tapped for sound
+  let adBreak = false;       // currently inside an ad break window
+  let breakMode = 'lofi';    // what to do during breaks: mute, lofi, ads
+  try {
+    const saved = localStorage.getItem('cnbcBreakMode');
+    if (saved && ['lofi', 'mute', 'ads'].indexOf(saved) >= 0) breakMode = saved;
+  } catch (e) {}
+  let wasInAd = false;
+  let dateRanges = {};
 
   function setError(msg) { errBox.textContent = 'Error: ' + msg; }
 
@@ -38,21 +110,172 @@
     for (let i = 0; i < tracks.length; i++) tracks[i].mode = 'disabled';
   }
 
+  function applyMute() {
+    video.muted = adBreak ? breakMode !== 'ads' : !soundOn;
+  }
+
+  // 150% TV-audio boost, routed through Web Audio only after a real user
+  // gesture so autoplay never gets caught in a suspended AudioContext.
+  let boostActivated = false;
+  function enableBoost() {
+    if (boostActivated || !window.AudioContext) return;
+    boostActivated = true;
+    try {
+      const ctx = new AudioContext();
+      const media = ctx.createMediaElementSource(video);
+      const gain = ctx.createGain();
+      gain.gain.value = 1.5;
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -2; limiter.knee.value = 0; limiter.ratio.value = 20;
+      limiter.attack.value = 0.003; limiter.release.value = 0.25;
+      media.connect(gain); gain.connect(limiter); limiter.connect(ctx.destination);
+      ctx.resume().catch(() => {});
+    } catch (e) {}
+  }
+  function markActivated() {
+    if (boostActivated) return;
+    enableBoost();
+    window.removeEventListener('pointerdown', markActivated);
+    window.removeEventListener('keydown', markActivated);
+  }
+  window.addEventListener('pointerdown', markActivated);
+  window.addEventListener('keydown', markActivated);
+
+  // "Go LIVE" button: jumps to the live edge when paused, then resumes playback.
+  const gotolive = document.getElementById('gotolive');
+  let started = false;
+  function goLive() {
+    gotolive.classList.add('hidden');
+    if (!hls) {
+      // Native path: seek to the end of the live window and resume.
+      if (video.seekable && video.seekable.length) {
+        video.currentTime = video.seekable.end(video.seekable.length - 1);
+      }
+      video.play().catch(() => {});
+      return;
+    }
+    // hls.js: resume loading from the live edge, then snap the playback
+    // position to the edge so we truly jump to "latest", not just unpause.
+    hls.startLoad(-1);
+    const toEdge = () => {
+      const t = hls.liveSyncPosition;
+      if (t != null && isFinite(t)) video.currentTime = t;
+      video.play().catch(() => {});
+    };
+    setTimeout(toEdge, 120);
+    setTimeout(() => video.play().catch(() => {}), 450);
+  }
+  gotolive.addEventListener('click', goLive);
+
+  // Show "Go LIVE" whenever the player is paused OR playing behind the live edge.
+  const LIVE_MARGIN_S = 5;
+  function updateGoLive() {
+    let show = false;
+    if (started) {
+      if (video.paused) {
+        show = true;
+      } else if (hls && hls.liveSyncPosition != null) {
+        show = (hls.liveSyncPosition - video.currentTime) > LIVE_MARGIN_S;
+      } else if (video.seekable && video.seekable.length) {
+        show = (video.seekable.end(video.seekable.length - 1) - video.currentTime) > LIVE_MARGIN_S;
+      }
+    }
+    gotolive.classList.toggle('hidden', !show);
+  }
+  setInterval(updateGoLive, 1500);
+
+  function applyBreakAudio() {
+    if (adBreak && breakMode === 'lofi') {
+      if (!lofiEl.src) { lofiEl.volume = 0.7; lofiEl.src = LOFI[0]; }
+      if (lofiEl.paused) lofiEl.play().catch(() => {});
+    } else if (!lofiEl.paused) {
+      lofiEl.pause();
+    }
+  }
+
+  function setBreakMode(m) {
+    breakMode = m;
+    try { localStorage.setItem('cnbcBreakMode', m); } catch (e) {}
+    for (const s of segs) s.classList.toggle('on', s.dataset.mode === m);
+    applyBreakAudio();
+    applyMute();
+  }
+
+  function fmtTime(sec) {
+    if (sec < 60) return sec + 's';
+    const m = Math.floor(sec / 60), s = sec % 60;
+    return s ? m + 'm' + s + 's' : m + 'm';
+  }
+
+  // "now" in program time (what's on screen), falling back to wall clock
+  function programNow() {
+    if (hls && hls.playingDate) return hls.playingDate.getTime();
+    return Date.now();
+  }
+
+  // SCTE-35 segmentation types: 0x22 = Break Start, 0x23 = Break End,
+  // 0x10 = Program Start, 0x11 = Program End. Only 0x22 ranges are ad breaks.
+  function breakWindows() {
+    const out = [];
+    for (const id in dateRanges) {
+      const r = dateRanges[id];
+      if (!r || !r.startDate) continue;
+      const start = r.startDate.getTime();
+      let end;
+      if (r.endDate) end = r.endDate.getTime();
+      else if (r.plannedDuration) end = start + r.plannedDuration * 1000;
+      else end = start + 180000;
+      out.push({ id, start, end, isBreak: id.indexOf('0x22') === 0 });
+    }
+    return out;
+  }
+
+  function evaluateBreak() {
+    const now = programNow();
+    const wins = breakWindows();
+    let inside = false;
+    let activeEnd = null;
+    for (const w of wins) {
+      if (w.isBreak && now >= w.start && now < w.end) { inside = true; activeEnd = w.end; }
+    }
+    adBreak = inside;
+    if (adBreak !== wasInAd) wasInAd = adBreak;
+    adctl.classList.toggle('show', adBreak);
+    applyBreakAudio();
+    if (adBreak) {
+      adcount.textContent = activeEnd != null
+        ? fmtTime(Math.max(0, Math.ceil((activeEnd - now) / 1000)))
+        : '--';
+    }
+    applyMute();
+  }
+
+  function onLevel(data) {
+    if (data && data.details && data.details.dateRanges) {
+      dateRanges = data.details.dateRanges;
+    }
+    evaluateBreak();
+  }
+
   function tryAutoplay() {
+    started = true;
     video.muted = true;
     disableSubtitles();
     video.play().catch(() => {});
+    evaluateBreak();
   }
 
   function start() {
     if (window.Hls && Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true });
+      hls = new Hls({ enableWorker: true });
       hls.subtitleDisplay = false;
       hls.subtitleTrack = -1;
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) setError(data.type + ': ' + data.details);
       });
       hls.on(Hls.Events.MANIFEST_PARSED, tryAutoplay);
+      hls.on(Hls.Events.LEVEL_LOADED, (_, data) => onLevel(data));
+      hls.on(Hls.Events.LEVEL_UPDATED, (_, data) => onLevel(data));
       hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, disableSubtitles);
       hls.loadSource(src);
       hls.attachMedia(video);
@@ -66,19 +289,24 @@
     }
   }
 
+  for (const s of segs) {
+    s.addEventListener('click', (e) => { e.stopPropagation(); setBreakMode(s.dataset.mode); });
+  }
+  setBreakMode(breakMode);
+
   overlay.addEventListener('click', () => {
-    video.muted = false;
+    soundOn = true;
     video.controls = true;
     disableSubtitles();
+    applyMute();
     video.play().catch(() => {});
     overlay.classList.add('hidden');
   });
 
-  if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    start();
-  } else {
-    window.addEventListener('DOMContentLoaded', start);
-  }
+  setInterval(evaluateBreak, 300);
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive') start();
+  else window.addEventListener('DOMContentLoaded', start);
 </script>
 </body>
 </html>
