@@ -30,6 +30,30 @@
   #gotolive:hover { background: rgba(255,255,255,0.22); }
   #gotolive:active { transform: translateX(-50%) scale(0.95); }
   #gotolive.hidden { display: none; }
+  #simad {
+    position: absolute; top: 16px; right: 16px;
+    z-index: 25; cursor: pointer; user-select: none;
+    color: #fff; font: 700 11px/1 system-ui; letter-spacing: 1px; text-transform: uppercase;
+    padding: 9px 16px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(0,0,0,0.45); backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    transition: background .18s ease, transform .12s ease;
+  }
+  #simad:hover { background: rgba(255,255,255,0.22); }
+  #simad:active { transform: scale(0.95); }
+  #simad.on { background: #ffb300; color: #111; font-weight: 700; }
+  #booststatus {
+    position: absolute; top: 58px; left: 50%; transform: translateX(-50%);
+    z-index: 25; color: #fff; font: 700 10px/1 ui-monospace, Menlo, monospace;
+    letter-spacing: 1px; text-transform: uppercase;
+    padding: 5px 12px; border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(20,20,20,0.55); backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    transition: opacity .3s ease, background .3s ease;
+  }
+  #booststatus.hidden { display: none; }
   #adctl {
     position: absolute; left: 18px; top: 50%; transform: translateY(-50%) scale(0.96);
     z-index: 15; display: none; flex-direction: column; align-items: center; gap: 8px;
@@ -68,6 +92,8 @@
   <video id="video" muted playsinline preload="auto"></video>
   <div id="overlay">Tap for sound</div>
   <button id="gotolive" class="hidden">Go LIVE</button>
+  <button id="simad">Sim AD</button>
+  <div id="booststatus" class="hidden">BOOST…</div>
   <div id="err"></div>
   <div id="adctl">
     <button class="seg" type="button" data-mode="lofi">LoFi</button>
@@ -85,6 +111,9 @@
   const segs = Array.from(document.querySelectorAll('#adctl .seg'));
   const lofiEl = document.getElementById('lofi');
   const adcount = document.getElementById('adcount');
+  const simad = document.getElementById('simad');
+  const boostStatus = document.getElementById('booststatus');
+  let simBreak = false;
   const LOFI = ['https://radio.loficafe.net/listen/chilling/radio.mp3',
                 'https://radio.loficafe.net/listen/sleeping/radio.mp3',
                 'https://radio.loficafe.net/listen/working/radio.mp3',
@@ -126,8 +155,10 @@
     // ads mode and normal programming: CNBC prominent at 1.0
 
     // CNBC level: Web Audio gain when available, else element volume.
+    // In gain mode the element volume (user's slider) is left alone; the
+    // 8x boost sits BETWEEN source and player, so 100% slider + boost is
+    // louder than 100% without it.
     if (boostCtx && cnbcGain) {
-      video.volume = 1.0;
       cnbcGain.gain.setTargetAtTime(cnbcVol, boostCtx.currentTime, 0.05);
     } else {
       video.volume = cnbcVol;
@@ -151,15 +182,18 @@
   }
 
   // 150% TV-audio boost, routed through Web Audio only after a real user
-  // gesture so autoplay never gets caught in a suspended AudioContext.
+  // gesture so autoplay never gets caught in a suspended AudioContext. The
+  // gain sits between the source element and the output, so it multiplies
+  // on top of the player's own volume slider.
+  const AudioCtor = window.AudioContext || window.webkitAudioContext;
   let boostActivated = false;
   let boostCtx = null;
   let cnbcGain = null;
   let lofiGain = null;
   function enableBoost() {
-    if (!window.AudioContext) return false;
+    if (!AudioCtor) return false;
     try {
-      const ctx = new AudioContext();
+      const ctx = new AudioCtor();
       const media = ctx.createMediaElementSource(video);
       cnbcGain = ctx.createGain();
       cnbcGain.gain.value = 1.0;
@@ -175,9 +209,8 @@
       lofiGain.gain.value = 0;
       lofiMedia.connect(lofiGain); lofiGain.connect(ctx.destination);
       boostCtx = ctx;
-      // Flag only AFTER the graph is really built: a setup throw must not
-      // leave the boost silently disengaged forever.
       boostActivated = true;
+      boostStatus.classList.remove('hidden');
       return true;
     } catch (e) {
       setError('boost: ' + (e && e.message));
@@ -189,15 +222,21 @@
       boostCtx.resume().catch(() => {});
     }
   }
+  function boostState() {
+    return boostCtx && boostCtx.state === 'running';
+  }
   function markActivated() {
-    if (!boostActivated) enableBoost();
-    resumeBoost();
-    // Keep listening until the context is actually running; otherwise a
-    // single failed resume would leave the boost silently disengaged.
-    if (boostCtx && boostCtx.state === 'running') {
+    if (boostActivated && boostState()) {
       window.removeEventListener('pointerdown', markActivated);
       window.removeEventListener('keydown', markActivated);
+      return;
     }
+    if (!boostActivated) enableBoost();
+    resumeBoost();
+  }
+  function updateBoostStatus() {
+    boostStatus.textContent = boostState() ? 'BOOST ON' : 'BOOST…';
+    boostStatus.style.background = boostState() ? 'rgba(0,120,60,0.55)' : 'rgba(20,20,20,0.55)';
   }
   window.addEventListener('pointerdown', markActivated);
   window.addEventListener('keydown', markActivated);
@@ -306,7 +345,8 @@
     for (const w of wins) {
       if (w.isBreak && now >= w.start && now < w.end) { inside = true; activeEnd = w.end; }
     }
-    adBreak = inside;
+    adBreak = inside || simBreak;
+    if (adBreak && !inside && simBreak) activeEnd = null;
     if (adBreak !== wasInAd) wasInAd = adBreak;
     adctl.classList.toggle('show', adBreak);
     applyAudioLevels();
@@ -371,7 +411,16 @@
     overlay.classList.add('hidden');
   });
 
+  simad.addEventListener('click', (e) => {
+    e.stopPropagation();
+    simBreak = !simBreak;
+    simad.classList.toggle('on', simBreak);
+    simad.textContent = simBreak ? 'Sim AD·ON' : 'Sim AD';
+    evaluateBreak();
+  });
+
   setInterval(evaluateBreak, 300);
+  setInterval(updateBoostStatus, 1000);
 
   if (document.readyState === 'complete' || document.readyState === 'interactive') start();
   else window.addEventListener('DOMContentLoaded', start);
