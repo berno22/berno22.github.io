@@ -56,12 +56,13 @@
   #volread b { color: #fff; font-weight: 700; }
   #pread {
     position: absolute; left: 18px; top: 50%; transform: translateY(-50%);
-    z-index: 16; color: #ffb300; font: 700 13px/1 ui-monospace, Menlo, monospace;
-    letter-spacing: 1px; text-align: center; padding: 8px 18px; border-radius: 999px;
-    background: rgba(0,0,0,0.6); backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255,179,0,0.35);
-    box-shadow: 0 6px 20px rgba(0,0,0,0.45);
+    z-index: 16; color: #b9bbbf; font: 700 13px/1 ui-monospace, Menlo, monospace;
+    letter-spacing: 1px; text-align: center; padding: 8px 18px; border-radius: 20px;
+    background: linear-gradient(180deg, rgba(36,38,43,0.55), rgba(20,22,26,0.55));
+    backdrop-filter: blur(16px) saturate(1.2);
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
     visibility: hidden; opacity: 0; pointer-events: none;
     transition: opacity .22s ease, visibility .22s;
   }
