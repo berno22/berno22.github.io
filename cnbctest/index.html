@@ -203,6 +203,7 @@
     diagCtx.fillStyle = WC.active ? '#0f0' : '#f88';
     diagCtx.fillText('wc:' + (WC.active ? 'ON' : 'off') + ' s:' + WC.samples
                      + ' d:' + WC.framesDrawn + '/' + WC.framesDecoded
+                     + ' f:' + WC.fps
                      + (WC.err ? ' ERR' : ''), 4, 43);
     diagCtx.fillStyle = '#aaa';
     diagCtx.fillText((WC.status || '').slice(0, 26), 4, 52);
@@ -499,20 +500,25 @@
   const WC = {
     mbox: null, dec: null, mux: null, active: false, haveInit: false, filePos: 0,
     trackId: null, timescale: 90000, initUrl: null, fetchedInit: false, level: null,
-    fetchedTracks: false, anchor: null, buf: [], chunks: [], lastDrawn: null,
+    fetchedTracks: false, anchor: null, anchorT: 0, buf: [], chunks: [], lastDrawn: null,
     framesDecoded: 0, framesDrawn: 0, lastPlaylist: 0, segs: {}, feeding: false,
-    segQueue: [], plSegs: [], status: '', err: '', samples: 0
+    segQueue: [], plSegs: [], status: '', err: '', samples: 0, fps: 1, lastPaint: 0
   };
   window.__WC = WC;
+  // Live retune for the car (no redeploy): sets display framerate, buffer and
+  // pacing bounds are derived from it.
+  window.__setFPS = (n) => {
+    WC.fps = Math.max(0.25, Math.min(30, +n || 1));
+    wcNote('fps -> ' + WC.fps);
+  };
   function wcNote(msg) {
     WC.status = msg;
     try { console.log('[WC]', msg); } catch (e) {}
   }
-  const WC_LEVEL = 4; // 1280x720 variant (index into master m3u8)
   const WC_POLL = 1200; // ms between playlist refreshes (segments are 4s)
-  // How far ahead of the audio clock to aim the fetched video (segment
-  // boundaries are 4s, we buffer ~1s beyond that for smoothness).
-  const WC_AIM = 2500;
+  // Pacing bounds (derived from the display framerate in wcPace/wcDraw - kept
+  // small so a 720p buffer never balloons: at 1fps ~6 frames (~25MB) total).
+  const WC_BUFFERS = 6; // decoded frames to hold (was 60 - 220MB)
 
   // Rebuild the avcDecoderConfigurationRecord (VideoDecoder description) from
   // the avcC box mp4box already parsed: version, profile/compat/level,
@@ -541,14 +547,17 @@
       output: (frame) => {
         WC.framesDecoded++;
         // Anchor = audioClock - frameTs maps the audio element onto the frame
-        // timeline. Only update it when the estimate is steady (within 500ms of
-        // the last) - a burst of decode-ahead outputs would otherwise yank the
-        // clock to the future, prune everything in wcDraw, and freeze motion.
+        // timeline. Follow slow real drift (~150ms/sec max) so hls live-edge
+        // re-syncs can't freeze it, but don't let a decode burst yank it.
         const est = video.currentTime * 1000000 - frame.timestamp;
-        if (WC.anchor == null || Math.abs(est - WC.anchor) < 500000) WC.anchor = est;
+        const nowPerf = performance.now();
+        const dt = Math.min(1, (nowPerf - (WC.anchorT || 0)) / 1000);
+        WC.anchorT = nowPerf;
+        if (WC.anchor == null) WC.anchor = est;
+        else WC.anchor += Math.max(-150000 * dt, Math.min(150000 * dt, est - WC.anchor));
         WC.buf.push(frame);
         // Cap the rolling buffer; drop nothing else here - wcDraw prunes.
-        while (WC.buf.length > 60) {
+        while (WC.buf.length > WC_BUFFERS + 2) {
           const f = WC.buf.shift();
           try { f.close(); } catch (e) {}
         }
@@ -580,18 +589,25 @@
     }
   }
 
-  // Feed the decoder only as much as the display can consume in realtime:
-  // decode chunks whose timestamp is at most ~3.5s ahead of the audio clock,
-  // hold or drop the rest, and respect the decoder's own queue depth. Output
-  // frames then arrive continuously instead of in bursts.
+  // Feed the decoder only as much as the display can consume: decode chunks no
+  // more than ~1.5s ahead of the audio clock, drop anything already far past
+  // it (so a stalled audio clock can't pile chunks without bound - that bloat
+  // is what made VideoDecoder die after a few minutes), and hold back when the
+  // decoder's own queue is deep. Bounds scale with the 1fps first test.
   function wcPace() {
-    if (!WC.dec || WC.dec.state !== 'configured' || !WC.chunks.length || WC.dec.decodeQueueSize > 120) return;
+    if (!WC.dec || WC.dec.state !== 'configured' || !WC.chunks.length) return;
     const now = video.currentTime * 1000000 - (WC.anchor || 0);
+    const lead = Math.max(1500000, WC.fps * 400000); // ~1.5s at low fps, more headroom as fps rises
+    const qmax = Math.max(6, Math.ceil(WC.fps * 6)); // decoder queue depth
+    if (WC.dec.decodeQueueSize > qmax) return;
+    // bound the encoded backlog: drop chunks that are already past the clock
+    let drop = 0;
+    while (drop < WC.chunks.length && WC.chunks[drop].ts < now - 1500000) drop++;
+    if (drop) WC.chunks.splice(0, drop);
     let i = 0;
-    for (; i < WC.chunks.length && WC.dec.decodeQueueSize < 120; i++) {
+    for (; i < WC.chunks.length && WC.dec.decodeQueueSize < qmax; i++) {
       const c = WC.chunks[i];
-      if (c.ts < now - 6000000) continue;               // way past the clock: skip
-      if (WC.anchor != null && c.ts > now + 3500000) break; // too far ahead: wait
+      if (WC.anchor != null && c.ts > now + lead) break; // too far ahead: wait
       try {
         WC.dec.decode(new EncodedVideoChunk({ type: c.sync ? 'key' : 'delta', timestamp: c.ts, data: c.raw }));
       } catch (e) { WC.err = 'decode ' + e.message; setError(WC.err); break; }
@@ -730,13 +746,21 @@
     }).catch(e => { WC.err = 'seg fetch ' + e.message; setError(WC.err); setTimeout(wcNextSeg, 300); });
   }
 
-  // Draw the decoded frame closest to the audio clock, every tick. The audio
-  // clock is expressed in frame-ts units via WC.anchor (audioClock - frameTs).
-  // Holds a small rolling buffer so it never gate-waits: prune what's >500ms
-  // past the clock, pick the newest frame at or just ahead of it.
+  // Draw the decoded frame closest to the audio clock at the configured
+  // framerate (default 1fps for the first Tesla soak test). The audio clock
+  // is expressed in frame-ts units via WC.anchor (audioClock - frameTs). The
+  // buffer is pruned every tick so memory stays tight even when we're only
+  // painting one frame a second.
   function wcDraw() {
     if (!WC.active || !WC.buf.length) return;
     const now = video.currentTime * 1000000 - (WC.anchor || 0);
+    for (let i = WC.buf.length - 1; i >= 0; i--) {
+      if (WC.buf[i].timestamp < now - 500000) {
+        try { WC.buf[i].close(); } catch (e) {}
+        WC.buf.splice(i, 1);
+      }
+    }
+    if (performance.now() - WC.lastPaint < 1000 / WC.fps) return;
     let best = null;
     for (let i = 0; i < WC.buf.length; i++) {
       const f = WC.buf[i];
@@ -746,13 +770,8 @@
       // everything is behind the clock; show the newest we have
       for (const f of WC.buf) if (!best || f.timestamp > best.timestamp) best = f;
     }
-    for (let i = WC.buf.length - 1; i >= 0; i--) {
-      if (WC.buf[i].timestamp < now - 500000) {
-        try { WC.buf[i].close(); } catch (e) {}
-        WC.buf.splice(i, 1);
-      }
-    }
     if (!best || best === WC.lastDrawn) return;
+    WC.lastPaint = performance.now();
     WC.lastDrawn = best;
     if (pan && pan.width > 0 && best.displayWidth > 0) {
       try {
