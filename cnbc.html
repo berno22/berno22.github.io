@@ -155,48 +155,60 @@
 
   function applyAudioLevels() {
     video.muted = !soundOn;
-    let cnbcVol = 1.0;
-    let lofiProminent = false;
-    if (adBreak && breakMode === 'lofi') { cnbcVol = cnbcLow(); lofiProminent = true; }
-    else if (adBreak && breakMode === 'mute') { cnbcVol = cnbcLow(); }
-    // ads mode and normal programming: CNBC prominent at 1.0
 
-    // Per-browser LoFi level: Safari (native HLS) honors element volume only,
-    // so 0.4 there. Chrome/Firefox use the Web Audio graph, where the element
-    // plays at 1.0 and the gain node carries the real 0.6.
-    const lofiLevel = nativeHls ? 0.4 : 0.6;
-
-    // Element volume is the AUTHORITATIVE level control (honored by desktop
-    // browsers). The Web Audio gain nodes are held at unity pass-through so
-    // they can never independently boost, mute, or double-attenuate the mix.
-    if (cnbcVol < 1.0) {
+    // CNBC target: low floor during lofi/mute breaks, else restore the slider.
+    let cnbcTarget;
+    if (adBreak && (breakMode === 'lofi' || breakMode === 'mute')) {
       if (savedSlider === null) savedSlider = video.volume;
-      video.volume = cnbcVol;
-    } else if (savedSlider !== null) {
-      video.volume = savedSlider;
+      cnbcTarget = cnbcLow();
+    } else {
+      cnbcTarget = savedSlider !== null ? savedSlider : 1.0;
       savedSlider = null;
     }
-    if (cnbcGain) cnbcGain.gain.value = 1.0;
 
-    // LoFi: muted element = silence; prominent = element volume exactly.
-    if (lofiProminent) {
-      lofiEl.muted = false;
-      lofiEl.volume = lofiLevel;
-    } else {
-      lofiEl.muted = true;
-      lofiEl.volume = 0;
-    }
-    if (lofiGain) lofiGain.gain.value = nativeHls ? 0 : 1.0;
+    // LoFi target: prominent only during a lofi break.
+    const lofiLevel = nativeHls ? 0.4 : 0.6;
+    const lofiProminent = !!(adBreak && breakMode === 'lofi');
+    const lofiTarget = lofiProminent ? lofiLevel : 0;
+
+    // Fade toward the targets (skips re-fading when targets are unchanged, since
+    // applyAudioLevels runs continuously on the break-poll interval).
+    if (soundOn) fadeValue(video, 'cnbc', cnbcTarget, FADE_MS);
+    fadeValue(lofiEl, 'lofi', lofiTarget, FADE_MS);
+    if (lofiTarget > 0 && lofiEl.muted) lofiEl.muted = false;
+    if (lofiTarget === 0 && !lofiEl.muted && lofiEl.volume === 0) lofiEl.muted = true;
+
+    if (cnbcGain) cnbcGain.gain.value = 1.0;
     // LoFi never pauses: always streaming so it's instantly ready.
     if (lofiEl.src && lofiEl.paused) lofiEl.play().catch(() => {});
 
-    // On-screen volume readout for testing: shows CNBC and LoFi levels as %
-    // of the raw stream. CNBC includes the 8x boost gain when the Web Audio
-    // graph is actually running.
-    const cnbcShow = video.muted ? 0 : cnbcVol * 100 * (boostState() ? 8 : 1);
-    const lofiShow = lofiEl.muted ? 0 : lofiLevel * 100;
+    // On-screen volume readout for testing: shows CURRENT levels as % of the
+    // raw stream. CNBC includes the 8x boost gain when the Web Audio graph is
+    // actually running.
+    const cnbcShow = video.muted ? 0 : video.volume * 100 * (boostState() ? 8 : 1);
+    const lofiShow = lofiEl.muted ? 0 : lofiEl.volume * 100;
     volcnbc.textContent = pct(cnbcShow);
     vollofi.textContent = pct(lofiShow);
+  }
+
+  const FADE_MS = 700;
+  const fadeTimers = {};
+  // Smoothly ramps el.volume from its current value to `to`. Rerunning with the
+  // same target is a no-op, so the continuous break-poll can safely call this.
+  function fadeValue(el, key, to, ms) {
+    const st = fadeTimers[key];
+    if (st && st.to === to && st.timer) return;
+    if (st && st.timer) clearInterval(st.timer);
+    const from = el.volume;
+    if (Math.abs(from - to) < 1e-6) { el.volume = to; fadeTimers[key] = { to, timer: null }; return; }
+    const start = performance.now();
+    const state = { to, start, dur: ms, timer: null };
+    fadeTimers[key] = state;
+    state.timer = setInterval(() => {
+      const t = Math.min(1, (performance.now() - start) / ms);
+      el.volume = from + (to - from) * t;
+      if (t >= 1) { clearInterval(state.timer); state.timer = null; }
+    }, 16);
   }
   function pct(v) {
     if (v === 0) return '0%';
@@ -311,7 +323,7 @@
   // at the inaudible floor under CNBC so it's instantly ready when a break hits.
   function startLoFi() {
     lofiEl.muted = true;
-    lofiEl.volume = 1.0; // muted pre-gesture; the gain node takes over post-graph
+    lofiEl.volume = 1.0; // muted pre-gesture; applyAudioLevels fades from here
     if (!lofiEl.src) lofiEl.src = LOFI[lofiIndex];
     applyAudioLevels();
     lofiEl.play().catch(() => {});
