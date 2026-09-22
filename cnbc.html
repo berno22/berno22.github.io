@@ -111,18 +111,20 @@
   }
 
   // Unified volume model: both streams always play simultaneously; state
-  // only sets levels. CNBC "low" is a ~1% faint bleed (never truly muted),
-  // compensated through the 8x Web Audio boost when it is active.
-  function cnbcLow() { return boostActivated ? 0.01 / 8 : 0.01; }
+  // only sets levels. "Low" levels sit at the inaudible floor above true
+  // mute (never 0) so both streams stay live and instantly switchable.
+  const CNBC_LOW = 0.0000001; // 0.00001%: floor above true mute, inaudible
+  function cnbcLow() { return CNBC_LOW; }
+  const LOFI_LOW = 0.0000001; // 0.00001%: floor above true mute, inaudible
 
   function applyAudioLevels() {
     video.muted = !soundOn;
     let cnbcVol = 1.0;
-    let lofiVol = 0.01;
+    let lofiVol = LOFI_LOW;
     if (adBreak) {
       if (breakMode === 'lofi') { cnbcVol = cnbcLow(); lofiVol = 0.6; }
-      else if (breakMode === 'mute') { cnbcVol = cnbcLow(); lofiVol = 0.01; }
-      else { cnbcVol = 1.0; lofiVol = 0.01; } // ads: CNBC prominent
+      else if (breakMode === 'mute') { cnbcVol = cnbcLow(); lofiVol = LOFI_LOW; }
+      else { cnbcVol = 1.0; lofiVol = LOFI_LOW; } // ads: CNBC prominent
     }
     video.volume = cnbcVol;
     lofiEl.volume = lofiVol;
@@ -140,9 +142,9 @@
   // 150% TV-audio boost, routed through Web Audio only after a real user
   // gesture so autoplay never gets caught in a suspended AudioContext.
   let boostActivated = false;
+  let boostCtx = null;
   function enableBoost() {
-    if (boostActivated || !window.AudioContext) return;
-    boostActivated = true;
+    if (!window.AudioContext) return false;
     try {
       const ctx = new AudioContext();
       const media = ctx.createMediaElementSource(video);
@@ -152,15 +154,31 @@
       limiter.threshold.value = -2; limiter.knee.value = 0; limiter.ratio.value = 20;
       limiter.attack.value = 0.003; limiter.release.value = 0.25;
       media.connect(gain); gain.connect(limiter); limiter.connect(ctx.destination);
-      ctx.resume().catch(() => {});
-    } catch (e) {}
+      boostCtx = ctx;
+      // Flag only AFTER the graph is really built: a setup throw must not
+      // leave the boost silently disengaged forever.
+      boostActivated = true;
+      return true;
+    } catch (e) {
+      setError('boost: ' + (e && e.message));
+      return false;
+    }
+  }
+  function resumeBoost() {
+    if (boostCtx && boostCtx.state === 'suspended') {
+      boostCtx.resume().catch(() => {});
+    }
   }
   function markActivated() {
     unlockLofi();
-    if (boostActivated) return;
-    enableBoost();
-    window.removeEventListener('pointerdown', markActivated);
-    window.removeEventListener('keydown', markActivated);
+    if (!boostActivated) enableBoost();
+    resumeBoost();
+    // Keep listening until the context is actually running; otherwise a
+    // single failed resume would leave the boost silently disengaged.
+    if (boostCtx && boostCtx.state === 'running') {
+      window.removeEventListener('pointerdown', markActivated);
+      window.removeEventListener('keydown', markActivated);
+    }
   }
   window.addEventListener('pointerdown', markActivated);
   window.addEventListener('keydown', markActivated);
@@ -216,10 +234,10 @@
   });
 
   // Load LoFi at page start (muted until first gesture) and keep it playing
-  // at 1% under CNBC so it's instantly ready when an ad break hits.
+  // at the inaudible floor under CNBC so it's instantly ready when a break hits.
   function startLoFi() {
     lofiEl.muted = true;
-    lofiEl.volume = 0.01;
+    lofiEl.volume = LOFI_LOW;
     if (!lofiEl.src) lofiEl.src = LOFI[lofiIndex];
     applyAudioLevels();
     lofiEl.play().catch(() => {});
