@@ -185,8 +185,8 @@
     // of the raw stream, accounting for the 8x boost when it is active.
     const cnbcShow = video.muted ? 0 : cnbcVol * 100;
     const lofiShow = lofiEl.muted ? 0 : (lofiProminent ? 40 : CNBC_LOW * 100);
-    volcnbc.textContent = cnbcShow.toFixed(4) + '%';
-    vollofi.textContent = lofiShow.toFixed(4) + '%';
+    volcnbc.textContent = cnbcShow.toFixed(7) + '%';
+    vollofi.textContent = lofiShow.toFixed(7) + '%';
   }
 
   // 150% TV-audio boost, routed through Web Audio only after a real user
