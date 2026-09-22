@@ -105,6 +105,10 @@
 </div>
 <script>
   const video = document.getElementById('video');
+  // Safari plays HLS natively and its WebKit bug prevents createMediaElementSource
+  // from routing audio through the graph, so element volume is the only control
+  // there. Chrome/Firefox use hls.js+MSE where the gain node works.
+  const nativeHls = !!(video.canPlayType && video.canPlayType('application/vnd.apple.mpegurl'));
   const overlay = document.getElementById('overlay');
   const errBox = document.getElementById('err');
   const adctl = document.getElementById('adctl');
@@ -157,6 +161,11 @@
     else if (adBreak && breakMode === 'mute') { cnbcVol = cnbcLow(); }
     // ads mode and normal programming: CNBC prominent at 1.0
 
+    // Per-browser LoFi level: Safari (native HLS) honors element volume only,
+    // so 0.4 there. Chrome/Firefox use the Web Audio graph, where the element
+    // plays at 1.0 and the gain node carries the real 0.6.
+    const lofiLevel = nativeHls ? 0.4 : 0.6;
+
     // Element volume is the AUTHORITATIVE level control (honored by desktop
     // browsers). The Web Audio gain nodes are held at unity pass-through so
     // they can never independently boost, mute, or double-attenuate the mix.
@@ -169,15 +178,15 @@
     }
     if (cnbcGain) cnbcGain.gain.value = 1.0;
 
-    // LoFi: muted element = silence; prominent = element volume 0.4 exactly.
+    // LoFi: muted element = silence; prominent = element volume exactly.
     if (lofiProminent) {
       lofiEl.muted = false;
-      lofiEl.volume = 0.4;
+      lofiEl.volume = lofiLevel;
     } else {
       lofiEl.muted = true;
       lofiEl.volume = 0;
     }
-    if (lofiGain) lofiGain.gain.value = 1.0;
+    if (lofiGain) lofiGain.gain.value = nativeHls ? 0 : 1.0;
     // LoFi never pauses: always streaming so it's instantly ready.
     if (lofiEl.src && lofiEl.paused) lofiEl.play().catch(() => {});
 
@@ -185,7 +194,7 @@
     // of the raw stream. CNBC includes the 8x boost gain when the Web Audio
     // graph is actually running.
     const cnbcShow = video.muted ? 0 : cnbcVol * 100 * (boostState() ? 8 : 1);
-    const lofiShow = lofiEl.muted ? 0 : (lofiProminent ? 40 : CNBC_LOW * 100);
+    const lofiShow = lofiEl.muted ? 0 : lofiLevel * 100;
     volcnbc.textContent = pct(cnbcShow);
     vollofi.textContent = pct(lofiShow);
   }
