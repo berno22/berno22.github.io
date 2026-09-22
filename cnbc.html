@@ -111,41 +111,42 @@
   }
 
   // Unified volume model: both streams always play simultaneously; state
-  // only sets levels. "Low" levels sit at the inaudible floor above true
-  // mute (never 0) so both streams stay live and instantly switchable.
+  // only sets levels. LoFi's silent bed is a hard element mute (iOS ignores
+  // element .volume value writes, but always honors .muted). CNBC's "low"
+  // keeps the above-mute floor as requested.
   const CNBC_LOW = 0.0000001; // 0.00001%: floor above true mute, inaudible
   function cnbcLow() { return CNBC_LOW; }
-  const LOFI_LOW = 0; // fully silent bed; only CNBC keeps the above-mute floor
 
   function applyAudioLevels() {
     video.muted = !soundOn;
     let cnbcVol = 1.0;
-    let lofiVol = LOFI_LOW;
-    if (adBreak) {
-      if (breakMode === 'lofi') { cnbcVol = cnbcLow(); lofiVol = 0.6; }
-      else if (breakMode === 'mute') { cnbcVol = cnbcLow(); lofiVol = LOFI_LOW; }
-      else { cnbcVol = 1.0; lofiVol = LOFI_LOW; } // ads: CNBC prominent
-    }
-    // Levels go through Web Audio gains when the graph exists (element
-    // .volume is ignored on iOS, so gains are the only reliable control).
-    // Fall back to element volume where there is no AudioContext.
-    if (boostCtx && cnbcGain && lofiGain) {
+    let lofiProminent = false;
+    if (adBreak && breakMode === 'lofi') { cnbcVol = cnbcLow(); lofiProminent = true; }
+    else if (adBreak && breakMode === 'mute') { cnbcVol = cnbcLow(); }
+    // ads mode and normal programming: CNBC prominent at 1.0
+
+    // CNBC level: Web Audio gain when available, else element volume.
+    if (boostCtx && cnbcGain) {
       video.volume = 1.0;
-      lofiEl.volume = 1.0;
       cnbcGain.gain.setTargetAtTime(cnbcVol, boostCtx.currentTime, 0.05);
-      lofiGain.gain.setTargetAtTime(lofiVol, boostCtx.currentTime, 0.05);
     } else {
       video.volume = cnbcVol;
-      lofiEl.volume = lofiVol;
+    }
+
+    // LoFi: muted element = guaranteed silence on every platform while the
+    // stream keeps playing. Unmuted only when prominent during a break.
+    if (lofiProminent) {
+      lofiEl.muted = false;
+      if (boostCtx && lofiGain) {
+        lofiEl.volume = 1.0;
+        lofiGain.gain.setTargetAtTime(0.6, boostCtx.currentTime, 0.05);
+      } else {
+        lofiEl.volume = 0.6;
+      }
+    } else {
+      lofiEl.muted = true;
     }
     // LoFi never pauses: always streaming so it's instantly ready.
-    if (lofiEl.src && lofiEl.paused) lofiEl.play().catch(() => {});
-  }
-
-  // LoFi starts muted (autoplay-safe) and is unmuted on first user gesture.
-  function unlockLofi() {
-    if (!lofiEl.muted) return;
-    lofiEl.muted = false;
     if (lofiEl.src && lofiEl.paused) lofiEl.play().catch(() => {});
   }
 
@@ -171,7 +172,7 @@
       gain.connect(limiter); limiter.connect(ctx.destination);
       const lofiMedia = ctx.createMediaElementSource(lofiEl);
       lofiGain = ctx.createGain();
-      lofiGain.gain.value = LOFI_LOW;
+      lofiGain.gain.value = 0;
       lofiMedia.connect(lofiGain); lofiGain.connect(ctx.destination);
       boostCtx = ctx;
       // Flag only AFTER the graph is really built: a setup throw must not
@@ -189,7 +190,6 @@
     }
   }
   function markActivated() {
-    unlockLofi();
     if (!boostActivated) enableBoost();
     resumeBoost();
     // Keep listening until the context is actually running; otherwise a
@@ -366,7 +366,6 @@
     soundOn = true;
     video.controls = true;
     disableSubtitles();
-    unlockLofi();
     applyAudioLevels();
     video.play().catch(() => {});
     overlay.classList.add('hidden');
