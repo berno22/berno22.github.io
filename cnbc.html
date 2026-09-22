@@ -54,6 +54,18 @@
   }
   #volread .vtag { color: #9a9da2; font: 600 9px/1 ui-monospace, Menlo, monospace; }
   #volread b { color: #fff; font-weight: 700; }
+  #pread {
+    position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%);
+    z-index: 24; color: #ffb300; font: 700 13px/1 ui-monospace, Menlo, monospace;
+    letter-spacing: 1px; text-align: center; padding: 8px 18px; border-radius: 999px;
+    background: rgba(0,0,0,0.6); backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,179,0,0.35);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.45);
+    visibility: hidden; opacity: 0; pointer-events: none;
+    transition: opacity .22s ease, visibility .22s;
+  }
+  #pread.show { visibility: visible; opacity: 1; }
   #adctl {
     position: absolute; left: 18px; top: 50%; transform: translateY(-50%) scale(0.96);
     z-index: 15; display: none; flex-direction: column; align-items: center; gap: 8px;
@@ -101,6 +113,7 @@
     <button class="seg" type="button" data-mode="ads">Ads</button>
     <div id="adcount">--</div>
   </div>
+  <div id="pread"></div>
   <audio id="lofi" crossorigin="anonymous" preload="auto" playsinline></audio>
 </div>
 <script>
@@ -115,6 +128,7 @@
   const segs = Array.from(document.querySelectorAll('#adctl .seg'));
   const lofiEl = document.getElementById('lofi');
   const adcount = document.getElementById('adcount');
+  const pread = document.getElementById('pread');
   const volread = document.getElementById('volread');
   const volcnbc = volread.querySelectorAll('b')[0];
   const vollofi = volread.querySelectorAll('b')[1];
@@ -370,18 +384,34 @@
     const wins = breakWindows();
     let inside = false;
     let activeEnd = null;
+    let nextStart = null;
     for (const w of wins) {
-      if (w.isBreak && now >= w.start && now < w.end) { inside = true; activeEnd = w.end; }
+      if (w.isBreak) {
+        if (now >= w.start && now < w.end) { inside = true; activeEnd = w.end; }
+        else if (now < w.start && (nextStart === null || w.start < nextStart)) nextStart = w.start;
+      }
     }
     adBreak = inside || simBreak;
     if (adBreak && !inside && simBreak) activeEnd = null;
     if (adBreak !== wasInAd) wasInAd = adBreak;
     adctl.classList.toggle('show', adBreak);
-    applyAudioLevels();
     if (adBreak) {
+      // In a break: hide the pre-roll countdown, reveal the mode selector.
+      pread.classList.remove('show');
       adcount.textContent = activeEnd != null
         ? fmtTime(Math.max(0, Math.ceil((activeEnd - now) / 1000)))
         : '--';
+      applyAudioLevels();
+    } else {
+      // Pre-break: as soon as SCTE-35 publishes a future break, count down.
+      adcount.textContent = '--';
+      if (nextStart !== null) {
+        pread.textContent = 'AD in ' + fmtTime(Math.max(0, Math.ceil((nextStart - now) / 1000)));
+        pread.classList.add('show');
+      } else {
+        pread.classList.remove('show');
+      }
+      applyAudioLevels();
     }
   }
 
