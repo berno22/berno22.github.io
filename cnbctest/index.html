@@ -8,7 +8,11 @@
 <style>
   body { margin: 0; background: #000; color: #eee; font: 14px system-ui; }
   #wrap { position: fixed; inset: 0; }
-  video { width: 100%; height: 100%; background: #000; }
+  video { width: 100%; height: 100%; background: #000;
+          /* rendered but fully hidden behind the canvas below; the video element
+             itself freezes when Tesla is in Drive, the canvas does not. */ }
+  #frame, video { position: absolute; inset: 0; }
+  #frame { width: 100%; height: 100%; background: #000; z-index: 1; }
   #overlay {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     background: rgba(0,0,0,0.55); color: #fff; font: 20px system-ui; cursor: pointer; z-index: 10;
@@ -79,6 +83,7 @@
 <body>
 <div id="wrap">
   <video id="video" muted playsinline preload="auto"></video>
+  <canvas id="frame"></canvas>
   <div id="overlay">Tap for sound</div>
   <button id="gotolive" class="hidden">Go LIVE</button>
   <div id="err"></div>
@@ -107,6 +112,25 @@
   const lofiEl = document.getElementById('lofi');
   const adcount = document.getElementById('adcount');
   const pread = document.getElementById('pread');
+  const pan = document.getElementById('frame');
+  const panCtx = pan.getContext('2d');
+  let panRAF = null;
+  // Draw the video's DECODED frames onto the canvas every animation frame.
+  // Tesla freezes <video> presentation while driving (audio keeps flowing);
+  // drawImage reads the decode pipeline, so the canvas keeps showing motion.
+  function pumpFrames() {
+    if (pan && video.videoWidth > 0) {
+      try {
+        const cw = pan.width, ch = pan.height;
+        const ratio = Math.min(cw / video.videoWidth, ch / video.videoHeight);
+        const w = video.videoWidth * ratio, h = video.videoHeight * ratio;
+        panCtx.fillStyle = '#000';
+        panCtx.fillRect(0, 0, cw, ch);
+        panCtx.drawImage(video, (cw - w) / 2, (ch - h) / 2, w, h);
+      } catch (e) {}
+    }
+    panRAF = requestAnimationFrame(pumpFrames);
+  }
   const LOFI = ['https://radio.loficafe.net/listen/chilling/radio.mp3',
                 'https://radio.loficafe.net/listen/sleeping/radio.mp3',
                 'https://radio.loficafe.net/listen/working/radio.mp3',
@@ -428,6 +452,14 @@
     video.play().catch(() => {});
     overlay.classList.add('hidden');
   });
+
+  function sizePan() {
+    const cw = window.innerWidth, ch = window.innerHeight;
+    if (pan) { pan.width = cw; pan.height = ch; }
+  }
+  window.addEventListener('resize', sizePan);
+  sizePan();
+  pumpFrames();
 
   setInterval(evaluateBreak, 300);
 
