@@ -132,6 +132,7 @@
   // keeps the above-mute floor as requested.
   const CNBC_LOW = 0.0000001; // 0.00001%: floor above true mute, inaudible
   function cnbcLow() { return CNBC_LOW; }
+  let savedSlider = null; // user's volume slider, restored after a break
 
   function applyAudioLevels() {
     video.muted = !soundOn;
@@ -141,14 +142,19 @@
     else if (adBreak && breakMode === 'mute') { cnbcVol = cnbcLow(); }
     // ads mode and normal programming: CNBC prominent at 1.0
 
-    // CNBC level: Web Audio gain when available, else element volume.
-    // In gain mode the element volume (user's slider) is left alone; the
-    // 8x boost sits BETWEEN source and player, so 100% slider + boost is
-    // louder than 100% without it.
+    // Apply CNBC level redundantly so it works on every browser:
+    //  - the Web Audio gain node covers iOS/edges,
+    //  - the element volume write covers desktop.
+    // The slider is restored to its pre-break value after the break.
     if (boostCtx && cnbcGain) {
-      cnbcGain.gain.setTargetAtTime(cnbcVol, boostCtx.currentTime, 0.05);
-    } else {
+      cnbcGain.gain.value = cnbcVol;
+    }
+    if (cnbcVol < 1.0) {
+      if (savedSlider === null) savedSlider = video.volume;
       video.volume = cnbcVol;
+    } else if (savedSlider !== null) {
+      video.volume = savedSlider;
+      savedSlider = null;
     }
 
     // LoFi: muted element = guaranteed silence on every platform while the
@@ -157,9 +163,9 @@
       lofiEl.muted = false;
       if (boostCtx && lofiGain) {
         lofiEl.volume = 1.0;
-        lofiGain.gain.setTargetAtTime(0.6, boostCtx.currentTime, 0.05);
+        lofiGain.gain.value = 0.4;
       } else {
-        lofiEl.volume = 0.6;
+        lofiEl.volume = 0.4;
       }
     } else {
       lofiEl.muted = true;
