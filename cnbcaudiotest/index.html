@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="referrer" content="unsafe-url">
+<title>CNBC Audio · TEST</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<style>
+  body { margin: 0; background: #f6f6f4; color: #111;
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  #wrap { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+          background: #f6f6f4; overflow-y: auto; }
+  #card { position: relative; z-index: 1; text-align: center; padding: 32px; zoom: 1.69;
+          margin: auto;
+          background: #fff; border: 1px solid rgba(0,0,0,0.08); border-radius: 20px;
+          box-shadow: 0 8px 40px rgba(0,0,0,0.06); }
+  h1 {
+    margin: 12px 0 0; font-size: 28px; font-weight: 600; letter-spacing: -0.2px; color: #62666a;
+    cursor: pointer; user-select: none; transition: color .25s; position: relative; z-index: 2;
+  }
+  h1:hover { color: #2f3236; }
+  #status { display: none; }
+  #status:hover { color: #2f3236; }
+  video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  #err { margin: 12px auto 0; color: #e82127; font-size: 12px; white-space: pre-wrap; }
+  #err:empty { display: none; }
+  #np { display: none; text-align: center; }
+  #np.on { display: block; animation: fadein .5s ease; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  #art {
+    display: block; margin: 0 auto; height: 173px; width: auto; max-width: 600px; border-radius: 12px; object-fit: contain;
+    border: 1px solid rgba(0,0,0,0.08);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+    cursor: pointer; user-select: none; outline: none; -webkit-tap-highlight-color: transparent;
+    transition: border-color .25s;
+  }
+  #art:hover { border-color: rgba(0,0,0,0.08); }
+  #brand { width: 132px; aspect-ratio: 900 / 506; pointer-events: none; margin-bottom: -6px;
+          background: #a3a6aa;
+          -webkit-mask-image: url('cnbc-logo.png'); -webkit-mask-size: contain;
+          -webkit-mask-repeat: no-repeat; -webkit-mask-position: center;
+          mask-image: url('cnbc-logo.png'); mask-size: contain;
+          mask-repeat: no-repeat; mask-position: center; }
+  #cut { margin: 12px auto 0; color: #5c5e62; font-size: 14px; max-width: 320px; }
+  #cut:empty { display: none; }
+  #cut.ad { font-style: italic; }
+  #credits { margin: 12px auto 0; color: #83878c; font-size: 12px; line-height: 1.45; max-width: 360px; }
+  #credits:empty { display: none; }
+  #desc { margin: 12px auto 0; color: #83878c; font-size: 12px; line-height: 1.45; max-width: 360px; }
+  #desc:empty { display: none; }
+  #upnext { margin: 12px auto 0; color: #c9ccce; font-size: 12px; line-height: 1.45; max-width: 360px; }
+  @media (max-width: 430px) {
+    #card { zoom: 1; padding: 20px 12px; }
+    #brand { width: 110px; }
+    h1 { font-size: 24px; }
+    #art { max-width: calc(100vw - 64px); }
+    #cut, #credits, #desc, #upnext { max-width: calc(100vw - 64px); }
+  }
+  @media (min-width: 431px) and (max-width: 790px) {
+    #card { zoom: 1; }
+  }
+  #upnext:empty { display: none; }
+  #vis {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    width: 100%; height: 330px; z-index: 0; pointer-events: none;
+    opacity: 0; transition: opacity .5s;
+  }
+  #vis.on { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="brand" role="img" aria-label="CNBC"></div>
+  <div id="card">
+    <p id="status">Loading&hellip;</p>
+    <div id="np">
+      <img id="art" alt="">
+    </div>
+    <h1 id="title">CNBC Audio</h1>
+    <div id="cut"></div>
+    <div id="credits"></div>
+    <div id="desc"></div>
+    <div id="upnext"></div>
+    <div id="err"></div>
+  </div>
+  <canvas id="vis"></canvas>
+  <video id="video" controls muted playsinline preload="auto"></video>
+</div>
+<script>
+  const video = document.getElementById('video');
+  const title = document.getElementById('title');
+  const status = document.getElementById('status');
+  const artEl = document.getElementById('art');
+  const ART_LOGO = 'art/logo.png';
+  const LOGO_SIZE = '1024x1024';
+  let mediaMeta = null;
+  const errBox = document.getElementById('err');
+  const vis = document.getElementById('vis');
+  const ctx = vis.getContext('2d');
+  let VW = 420, VH = 150;
+  let PERIOD = 96, baseAmp = 40;
+  let midY = 75, hist = null, pen = 0, period = PERIOD, amp = baseAmp;
+  let raf = 0;
+  // Stream URL is never embedded (tokens expire). It is derived on every load:
+  // cnbc.html (same origin) -> stable master playlist URL -> master playlist
+  // -> current TYPE=AUDIO manifest URL (token included). No stale fallback:
+  // if resolution fails, the failure is shown loudly and retried, never
+  // silently played from a dead URL.
+  const MASTER_FALLBACK = 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
+  let src = null;
+  let started = false;
+  let resolving = false, resolveTimer = 0;
+
+  function fetchText(url, ms) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), ms || 10000);
+    return fetch(url, { cache: 'no-store', signal: ctl.signal }).then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    }).finally(() => clearTimeout(t));
+  }
+
+  async function resolveStreamUrl() {
+    const bust = u => u + (u.indexOf('?') < 0 ? '?' : '&') + 'ts=' + Date.now();
+    let master = MASTER_FALLBACK;
+    try {
+      const html = await fetchText(bust('../cnbc.html'));
+      const m = html.match(/https:\/\/cnbc\.mt\.linear\.viewlift\.com\/v1\/master\/[A-Za-z0-9_.\-\/]+?\.m3u8/);
+      if (!m) throw new Error('master URL not found in cnbc.html');
+      master = m[0];
+    } catch (e) {
+      master = MASTER_FALLBACK; // tokenless + stable, safe to keep hardcoded
+    }
+    const pl = await fetchText(bust(master));
+    const media = pl.match(/EXT-X-MEDIA:[^\n]*TYPE=AUDIO[^\n]*/);
+    const a = media && media[0].match(/URI="([^"]*\/7\.m3u8)"/);
+    if (!a) throw new Error('audio entry not found in master playlist');
+    return new URL(a[1], master).href; // RFC-resolve the ../../.. URI, same as hls.js does
+  }
+
+  function boot(fromTap) {
+    if (resolving) return;
+    resolving = true;
+    clearTimeout(resolveTimer);
+    resolveStreamUrl().then(url => {
+      resolving = false;
+      src = url;
+      errBox.textContent = '';
+      started = true;
+      ensureCtx();
+      attach(fromTap);
+    }).catch(e => {
+      resolving = false;
+      started = false;
+      setError('Could not resolve stream (' + ((e && e.message) || e) + ') - retrying. Tap "CNBC Audio" to retry now.');
+      clearTimeout(resolveTimer);
+      resolveTimer = setTimeout(() => boot(false), 15000);
+    });
+  }
+
+  let N = 52, BW = 6, GAP = 3;
+  let levels = new Float32Array(N);
+  let vel = new Float32Array(N);
+  let tgt = new Float32Array(N);
+  function rebuildBars() {
+    N = Math.min(140, Math.max(36, Math.round(VW / 24)));
+    GAP = VW > 1600 ? 8 : VW > 1000 ? 6 : 3;
+    const halfW = VW / 2;
+    if ((N - 1) * GAP >= halfW) GAP = Math.max(1, Math.round(halfW * 0.12 / N));
+    BW = (halfW - (N - 1) * GAP) / N;
+    levels = new Float32Array(N);
+    vel = new Float32Array(N);
+    tgt = new Float32Array(N);
+  }
+
+  function rebuild() {
+    midY = VH / 2;
+    hist = new Float32Array(VW + 1);
+    for (let i = 0; i <= VW; i++) hist[i] = midY;
+    PERIOD = Math.max(48, VW / 4.4);
+    baseAmp = VH * 0.27;
+    period = PERIOD;
+    amp = baseAmp;
+    pen = 0;
+    rebuildBars();
+  }
+
+  function sizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    const r = vis.getBoundingClientRect();
+    VW = Math.max(1, Math.round(r.width));
+    VH = Math.max(1, Math.round(r.height));
+    vis.width = VW * dpr;
+    vis.height = VH * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    rebuild();
+  }
+  sizeCanvas();
+  window.addEventListener('resize', sizeCanvas);
+
+  function refresh() { location.reload(); }
+
+  function setError(msg) { errBox.textContent = 'Error: ' + msg; }
+  function setLive() {}
+  function setStatus(t) { status.textContent = t; }
+
+  function autoReload() {
+    let n = parseInt(sessionStorage.getItem('cnbcAutoReload') || '0', 10);
+    if (n >= 100) {
+      sessionStorage.removeItem('cnbcAutoReload');
+      setStatus('Stuck - click "CNBC Audio" to reload');
+      return;
+    }
+    n++;
+    sessionStorage.setItem('cnbcAutoReload', String(n));
+    setStatus('Stuck - reloading\u2026');
+    setTimeout(refresh, 600);
+  }
+
+  let lastTime = -1;
+  let stuck = 0;
+  let establishedAt = 0;
+  setInterval(() => {
+    const t = video.currentTime;
+    if (!started || video.paused || video.ended) { stuck = 0; lastTime = t; return; }
+    if (t === lastTime) {
+      if (establishedAt && performance.now() - establishedAt > 6000) {
+        stuck++;
+        if (stuck >= 6) { stuck = 0; video.play().catch(() => {}); autoReload(); }
+      }
+    } else {
+      stuck = 0;
+      lastTime = t;
+      if (!establishedAt) establishedAt = performance.now();
+    }
+  }, 500);
+
+  let audioCtx = null, analyser = null, dataArray = null;
+
+  function ensureCtx() {
+    if (audioCtx) return;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) {
+      audioCtx = null;
+    }
+  }
+
+  let wireTries = 0;
+  function wireAnalyser() {
+    if (analyser || !audioCtx || !started) return;
+    try {
+      let srcNode = null;
+      if (video.captureStream) {
+        const stream = video.captureStream();
+        if (!stream.getAudioTracks().length) {
+          if (wireTries++ < 12) setTimeout(wireAnalyser, 300);
+          return;
+        }
+        srcNode = audioCtx.createMediaStreamSource(stream);
+      } else {
+        srcNode = audioCtx.createMediaElementSource(video);
+        srcNode.connect(audioCtx.destination);
+      }
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.82;
+      srcNode.connect(analyser);
+      dataArray = new Uint8Array(analyser.frequencyBinCount);
+    } catch (e) {
+      analyser = null;
+    }
+  }
+
+  let phase = 0, synthStart = 0, synthetic = false;
+
+  function synthTarget(i, t) {
+    const base = 0.18 + 0.35 * Math.abs(Math.sin(t * 1.4 + i * 0.6));
+    const wob = 0.45 * Math.abs(Math.sin(t * 3.1 + Math.sin(i * 0.9 + t) * 2.2));
+    const spike = Math.pow(Math.max(0, Math.sin(t * 0.7 + i * 1.3) - 0.86) / 0.14, 2) * 0.5;
+    return Math.min(1, base + wob + spike);
+  }
+
+  function drawBar(x, y, w, h) {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, 4);
+    else ctx.rect(x, y, w, h);
+    ctx.fill();
+  }
+
+  function render() {
+    raf = requestAnimationFrame(render);
+    phase += 0.016;
+    const midY = VH / 2;
+    ctx.clearRect(0, 0, VW, VH);
+
+    let alive = 0;
+    if (analyser && dataArray) {
+      analyser.getByteFrequencyData(dataArray);
+      for (let i = 0; i < dataArray.length; i++) alive += dataArray[i];
+      if (alive > 0) synthetic = false;
+      if (alive === 0) {
+        if (!synthStart) synthStart = performance.now();
+        else if (performance.now() - synthStart > 700) synthetic = true;
+      } else {
+        synthStart = 0;
+      }
+    } else {
+      synthStart = 0;
+      synthetic = true;
+    }
+
+    ctx.globalAlpha = 0.85;
+    for (let i = 0; i < N; i++) {
+      if (analyser && dataArray && !synthetic) {
+        const idx = Math.floor(Math.pow(i / N, 1.6) * (dataArray.length * 0.75));
+        tgt[i] = dataArray[idx] / 255;
+      } else {
+        tgt[i] = synthTarget(i, phase);
+      }
+      vel[i] += (tgt[i] - levels[i]) * 0.22;
+      vel[i] *= 0.78;
+      levels[i] += vel[i];
+      const h = Math.max(2, levels[i] * (midY - 10));
+      const y = midY - h / 2;
+      const grad = ctx.createLinearGradient(0, midY - h, 0, midY + h);
+      grad.addColorStop(0, '#d8d8d8');
+      grad.addColorStop(0.5, '#c6c6c6');
+      grad.addColorStop(1, '#b3b3b3');
+      ctx.fillStyle = grad;
+      ctx.shadowBlur = 6;
+      ctx.shadowColor = 'rgba(0,0,0,0.12)';
+      const xL = i * (BW + GAP);
+      const xR = VW - xL - BW;
+      drawBar(xL, y, BW, h);
+      drawBar(xR, y, BW, h);
+      ctx.fillStyle = 'rgba(90,90,90,0.25)';
+      ctx.shadowBlur = 0;
+      ctx.fillRect(xL, y, BW, 2);
+      ctx.fillRect(xR, y, BW, 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  }
+
+  function startVis() {
+    vis.classList.add('on');
+    if (!raf) render();
+  }
+  function stopVis() {
+    vis.classList.remove('on');
+    cancelAnimationFrame(raf);
+    raf = 0;
+  }
+
+  let playTries = 0;
+  function playWithRetry() {
+    if (!started) return;
+    if (video.paused === false) { playTries = 0; return; }
+    video.play().then(() => {
+      playTries = 0;
+      setStatus('Live'); startVis();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => wireAnalyser());
+      else wireAnalyser();
+      sessionStorage.setItem('cnbcAutoReload', '0');
+    }).catch(() => {
+      playTries++;
+      if (playTries < 15) {
+        setTimeout(() => { if (started && video.paused) playWithRetry(); }, 800);
+      } else {
+        started = false;
+        setStatus('Tap to play again');
+      }
+    });
+  }
+
+  function togglePlay() {
+    if (!started) {
+      ensureCtx();
+      boot(true);
+    } else if (video.paused === false && video.muted) {
+      video.muted = false;
+      ensureCtx();
+      setStatus('Live');
+    } else if (video.paused === false) {
+      sessionStorage.setItem('cnbcClickReload', '1');
+      refresh();
+    } else if (video.muted === false) {
+      started = true;
+      ensureCtx();
+      playWithRetry();
+    }
+  }
+  title.addEventListener('click', togglePlay);
+  status.addEventListener('click', togglePlay);
+  artEl.addEventListener('click', togglePlay);
+  if (navigator.mediaSession) {
+    try {
+      navigator.mediaSession.setActionHandler('play', () => { if (video.paused) togglePlay(); });
+      navigator.mediaSession.setActionHandler('pause', () => { if (!video.paused) togglePlay(); });
+    } catch (e) {}
+  }
+  updateMediaSession('CNBC Audio');
+
+  function tryAutoplay() {
+    if (video.paused === false) {
+      started = true; startVis();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => wireAnalyser());
+      else wireAnalyser();
+      return;
+    }
+    started = true;
+    const unmuted = sessionStorage.getItem('cnbcClickReload') === '1';
+    sessionStorage.removeItem('cnbcClickReload');
+    video.muted = !unmuted;
+    video.play().then(() => {
+      setStatus(unmuted ? 'Live' : 'Muted - tap to unmute');
+      startVis();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().then(() => wireAnalyser());
+      else wireAnalyser();
+      sessionStorage.setItem('cnbcAutoReload', '0');
+    }).catch(() => {
+      started = false;
+      video.muted = true;
+      setStatus('Click to play');
+    });
+  }
+
+  function playUnmuted() {
+    video.muted = false;
+    playWithRetry();
+  }
+
+  function startHls(waited, fromTap) {
+    if (!window.Hls) {
+      if ((waited || 0) < 40) setTimeout(() => startHls((waited || 0) + 1, fromTap), 250);
+      else setError('HLS is not supported in this browser');
+      return;
+    }
+    if (!Hls.isSupported()) { setError('HLS is not supported in this browser'); return; }
+    const hls = new Hls({ enableWorker: true });
+    hls.on(Hls.Events.ERROR, (_, data) => {
+      if (data.fatal) { setError(data.type + ': ' + data.details + ' - reloading'); autoReload(); }
+    });
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      setLive();
+      if (fromTap) playUnmuted(); else tryAutoplay();
+    });
+    hls.loadSource(src);
+    hls.attachMedia(video);
+  }
+
+  function attach(fromTap) {
+    const native = !!(video.canPlayType && video.canPlayType('application/vnd.apple.mpegurl') !== '');
+    if (native) {
+      video.src = src;
+      const onMeta = () => {
+        video.removeEventListener('loadedmetadata', onMeta);
+        video.removeEventListener('error', onErr);
+        setLive();
+        if (fromTap) playUnmuted(); else tryAutoplay();
+      };
+      const onErr = () => {
+        video.removeEventListener('loadedmetadata', onMeta);
+        video.removeEventListener('error', onErr);
+        startHls(0, fromTap);
+      };
+      video.addEventListener('loadedmetadata', onMeta);
+      video.addEventListener('error', onErr);
+    } else {
+      startHls(0, fromTap);
+    }
+  }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    boot(false);
+  } else {
+    window.addEventListener('DOMContentLoaded', () => boot(false));
+  }
+
+  const GUIDE_URL = 'https://webql-redesign.cnbcfm.com/graphql';
+  let artMap = {};
+  const np = document.getElementById('np');
+  const cutEl = document.getElementById('cut');
+  const creditsEl = document.getElementById('credits');
+  const descEl = document.getElementById('desc');
+  const upNextEl = document.getElementById('upnext');
+
+function sqArt(u) {
+    if (!/image\.cnbcfm\.com/.test(u)) return u;
+    const i = u.indexOf('?');
+    const q = new URLSearchParams(i < 0 ? '' : u.slice(i + 1));
+    q.set('w', '640'); q.set('h', '640');
+    return (i < 0 ? u : u.slice(0, i)) + '?' + q.toString();
+}
+
+  function updateMediaSession(title_, artist_, album_, artSrc) {
+    if (!(navigator.mediaSession && window.MediaMetadata)) return;
+    const title = title_ || '';
+    const artist = artist_ || '';
+    const album = album_ || '';
+    if (!mediaMeta) {
+      mediaMeta = new MediaMetadata({
+        title: title,
+        artist: artist,
+        album: album,
+        artwork: [{ src: ART_LOGO, sizes: LOGO_SIZE, type: 'image/png' }]
+      });
+      navigator.mediaSession.metadata = mediaMeta;
+    } else {
+      mediaMeta.title = title;
+      mediaMeta.artist = artist;
+      mediaMeta.album = album;
+    }
+  }
+
+  function renderBreak() {
+    cutEl.textContent = 'Advertisement';
+    cutEl.classList.add('ad');
+    artEl.src = ART_LOGO;
+    updateMediaSession('CNBC - Advertisement', '', '', ART_LOGO);
+  }
+
+  function renderShow(live) {
+    if (!live || !live.title) return;
+    lastLive = live;
+    title.textContent = live.title;
+    document.title = live.title + ' \u00b7 CNBC Audio';
+    if (plAd) {
+      cutEl.textContent = 'Advertisement';
+      cutEl.classList.add('ad');
+    } else {
+      cutEl.textContent = '';
+      cutEl.classList.remove('ad');
+    }
+    creditsEl.textContent = fmtCredits(live.credits);
+    descEl.textContent = live.description || '';
+    const nu = (lastComingUp && lastComingUp[0]) || null;
+    const tm = nu && (nu.startTimeFormatted || '').match(/(\d{1,2})(?::(\d\d))?\s*(am|pm)/i);
+    const at = tm ? ' at ' + parseInt(tm[1], 10) + (tm[2] && tm[2] !== '00' ? ':' + tm[2] : '') + tm[3][0].toLowerCase() : '';
+    upNextEl.textContent = nu ? 'Next' + at + ' | ' + (nu.shortTitle || '') : '';
+    const slug = (live.url || '').replace(/\/+$/, '');
+    const norm = x => (x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const tN = norm(live.shortTitle || live.title), sN = norm(slug);
+    const raw = artMap[slug];
+    const okRaw = raw && tN && (sN.indexOf(tN) === 0 || tN.indexOf(sN) === 0);
+    const localArt = okRaw ? (raw.local || null) : null;
+    const splashUrl = (okRaw && raw.url) || null;
+    artEl.src = plAd ? ART_LOGO : (splashUrl || ART_LOGO);
+    const lockImg = ART_LOGO;
+    updateMediaSession(
+      'CNBC - ' + (plAd ? 'Advertisement' : live.title), '',
+      live.displayGenre || '',
+      ART_LOGO
+    );
+    np.classList.add('on');
+  }
+
+  function fmtCredits(c) {
+    if (!c) return '';
+    if (typeof c === 'string') return c;
+    if (Array.isArray(c)) return c.map(x =>
+      typeof x === 'string' ? x
+      : [x.name || x.person || x.title, x.role].filter(Boolean).join(' \u2013 ')
+    ).filter(Boolean).join(', ');
+    if (typeof c === 'object') return c.text || c.summary || '';
+    return '';
+  }
+
+  let guideBusy = false, pendingGuide = false, guideTimer = null, lastComingUp = null;
+  function fetchGuide() {
+    if (guideBusy) return;
+    guideBusy = true;
+    clearTimeout(guideTimer);
+    guideTimer = setTimeout(() => { guideBusy = false; maybeGuide(); }, 9000);
+    fetch(GUIDE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        operationName: 'showsSchedule',
+        variables: { primeTime: false, scheduleDateStart: 0, scheduleDateEnd: 0 },
+        query: 'query showsSchedule($primeTime: Boolean, $scheduleDateStart: Int, $scheduleDateEnd: Int) { showsSchedule(primeTime: $primeTime, scheduleDateStart: $scheduleDateStart, scheduleDateEnd: $scheduleDateEnd) { live { episodeGuid title shortTitle url startTimeFormatted endTimeFormatted description displayGenre credits tvSeasonNumber seriesEpisodeNumber } comingUp { shortTitle startTimeFormatted } } }'
+      })
+    }).then(r => r.json()).then(d => {
+      guideBusy = false;
+      const g = d.data && d.data.showsSchedule;
+      lastComingUp = (g && g.comingUp) || null;
+      renderShow(g && g.live);
+      if (pendingGuide) { pendingGuide = false; fetchGuide(); }
+    }).catch(() => { guideBusy = false; });
+  }
+
+  function maybeGuide() {
+    if (!guideBusy) { pendingGuide = false; fetchGuide(); }
+    else pendingGuide = true;
+  }
+
+  artEl.onerror = () => artEl.src = ART_LOGO;
+
+  window.addEventListener('message', (ev) => {
+    const d = ev.data;
+    if (!d || d.m !== 'pl') return;
+    plBusy = false;
+    handlePl(d);
+  });
+
+  let plBusy = false;
+  function pollPlaylist() {
+    if (plBusy || !started) return;
+    plBusy = true;
+    const js = "fetch('" + src + "',{mode:'cors',cache:'no-store'}).then(r=>r.text()).then(t=>{"
+      + "var ep=null,ad=false,re=/DATERANGE:[^\\n]*/g,m,rp=/EXT-X-PROGRAM-DATE-TIME:([^\\r\\n]+)/g,pm,pdt=null;"
+      + "while((pm=rp.exec(t))){var pv=Date.parse(pm[1].trim());if(!isNaN(pv))pdt=pv;}"
+      + "var now=pdt!==null?pdt:Date.now(),aend=null;"
+      + "while((m=re.exec(t))){"
+      + "var line=m[0];"
+      + "var sm=line.match(/START-DATE=\"([^\"]+)\"/);if(!sm)continue;"
+      + "var st=Date.parse(sm[1]);if(isNaN(st))continue;"
+      + "var dm=line.match(/PLANNED-DURATION=([0-9.]+)/);var dur=dm?parseFloat(dm[1]):0;"
+      + "var hm=line.match(/SCTE35(?:-OUT)?=0x([0-9a-fA-F]+)/);"
+      + "var em=null;if(hm){var hex=hm[1],s='';for(var i=0;i<hex.length;i+=2)s+=String.fromCharCode(parseInt(hex.substr(i,2),16));em=s.match(/EP[0-9A-Za-z]+/);}"
+      + "var inwin=dur>0&&now>=st&&now<st+dur*1000;"
+      + "if(inwin&&dur>900&&em&&!ep)ep=em[0];"
+      + "if(inwin&&dur>0&&dur<=900){ad=true;aend=st+dur*1000;}"
+      + "}"
+      + "parent.postMessage({m:'pl',ep:ep,ad:ad,end:aend,now:now},'*');"
+      + "}).catch(e=>parent.postMessage({m:'pl',err:String(e)},'*'));";
+    const f = document.createElement('iframe');
+    f.sandbox = 'allow-scripts';
+    f.style.display = 'none';
+    f.srcdoc = '<scr' + 'ipt>' + js + '</scr' + 'ipt>';
+    document.body.appendChild(f);
+    setTimeout(() => f.remove(), 20000);
+    setTimeout(() => { plBusy = false; }, 8000);
+  }
+
+  let plEp = null, plAd = false;
+
+  let lastLive = null;
+  function handlePl(d) {
+    window.__plg = window.__plg || { n: 0 };
+    window.__plg.n++;
+    window.__plg.last = d.err ? { err: d.err } : { ep: d.ep, ad: d.ad };
+    const wasAd = plAd, wasEp = plEp;
+    plAd = !!d.ad;
+    if (d.ep) plEp = d.ep;
+    const epChanged = d.ep && wasEp !== null && d.ep !== wasEp;
+    const adOn = plAd && !wasAd;
+    const adOff = !plAd && wasAd;
+    if (adOn) renderBreak();
+    else if (adOff || epChanged) {
+      maybeGuide();
+    }
+  }
+
+  artEl.src = ART_LOGO;
+  updateMediaSession('CNBC Audio', '', '', ART_LOGO);
+  np.classList.add('on');
+  let tick = 0;
+  setInterval(() => {
+    tick++;
+    const playing = !video.paused;
+    if (playing || tick % 15 === 0) pollPlaylist();
+    const wantGuide = (playing && tick % 15 === 0) || (!playing && tick % 30 === 0);
+    if ((wantGuide || pendingGuide || tick % 900 === 0) && !guideBusy) { pendingGuide = false; fetchGuide(); }
+  }, 4000);
+  fetch('art.json').then(r => r.json()).then(m => { for (const k in m) artMap[k] = typeof m[k] === 'string' ? { url: m[k] } : m[k]; }).catch(() => {}).finally(() => fetchGuide());
+</script>
+</body>
+</html>
