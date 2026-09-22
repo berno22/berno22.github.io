@@ -75,7 +75,7 @@
     <button class="seg" type="button" data-mode="ads">Ads</button>
     <div id="adcount">--</div>
   </div>
-  <audio id="lofi" crossorigin="anonymous" preload="none" playsinline></audio>
+  <audio id="lofi" crossorigin="anonymous" preload="auto" playsinline></audio>
 </div>
 <script>
   const video = document.getElementById('video');
@@ -110,8 +110,31 @@
     for (let i = 0; i < tracks.length; i++) tracks[i].mode = 'disabled';
   }
 
-  function applyMute() {
-    video.muted = adBreak ? breakMode !== 'ads' : !soundOn;
+  // Unified volume model: both streams always play simultaneously; state
+  // only sets levels. CNBC "low" is a ~1% faint bleed (never truly muted),
+  // compensated through the 8x Web Audio boost when it is active.
+  function cnbcLow() { return boostActivated ? 0.01 / 8 : 0.01; }
+
+  function applyAudioLevels() {
+    video.muted = !soundOn;
+    let cnbcVol = 1.0;
+    let lofiVol = 0.01;
+    if (adBreak) {
+      if (breakMode === 'lofi') { cnbcVol = cnbcLow(); lofiVol = 0.6; }
+      else if (breakMode === 'mute') { cnbcVol = cnbcLow(); lofiVol = 0.01; }
+      else { cnbcVol = 1.0; lofiVol = 0.01; } // ads: CNBC prominent
+    }
+    video.volume = cnbcVol;
+    lofiEl.volume = lofiVol;
+    // LoFi never pauses: always streaming so it's instantly ready.
+    if (lofiEl.src && lofiEl.paused) lofiEl.play().catch(() => {});
+  }
+
+  // LoFi starts muted (autoplay-safe) and is unmuted on first user gesture.
+  function unlockLofi() {
+    if (!lofiEl.muted) return;
+    lofiEl.muted = false;
+    if (lofiEl.src && lofiEl.paused) lofiEl.play().catch(() => {});
   }
 
   // 150% TV-audio boost, routed through Web Audio only after a real user
@@ -133,6 +156,7 @@
     } catch (e) {}
   }
   function markActivated() {
+    unlockLofi();
     if (boostActivated) return;
     enableBoost();
     window.removeEventListener('pointerdown', markActivated);
@@ -184,21 +208,28 @@
   }
   setInterval(updateGoLive, 1500);
 
-  function applyBreakAudio() {
-    if (adBreak && breakMode === 'lofi') {
-      if (!lofiEl.src) { lofiEl.volume = 0.6; lofiEl.src = LOFI[0]; }
-      if (lofiEl.paused) lofiEl.play().catch(() => {});
-    } else if (!lofiEl.paused) {
-      lofiEl.pause();
-    }
+  // LoFi fallback: cycle stations if one fails, keep playing.
+  let lofiIndex = 0;
+  lofiEl.addEventListener('error', () => {
+    lofiIndex = (lofiIndex + 1) % LOFI.length;
+    try { lofiEl.src = LOFI[lofiIndex]; lofiEl.play().catch(() => {}); } catch (e) {}
+  });
+
+  // Load LoFi at page start (muted until first gesture) and keep it playing
+  // at 1% under CNBC so it's instantly ready when an ad break hits.
+  function startLoFi() {
+    lofiEl.muted = true;
+    lofiEl.volume = 0.01;
+    if (!lofiEl.src) lofiEl.src = LOFI[lofiIndex];
+    applyAudioLevels();
+    lofiEl.play().catch(() => {});
   }
 
   function setBreakMode(m) {
     breakMode = m;
     try { localStorage.setItem('cnbcBreakMode', m); } catch (e) {}
     for (const s of segs) s.classList.toggle('on', s.dataset.mode === m);
-    applyBreakAudio();
-    applyMute();
+    applyAudioLevels();
   }
 
   function fmtTime(sec) {
@@ -241,13 +272,12 @@
     adBreak = inside;
     if (adBreak !== wasInAd) wasInAd = adBreak;
     adctl.classList.toggle('show', adBreak);
-    applyBreakAudio();
+    applyAudioLevels();
     if (adBreak) {
       adcount.textContent = activeEnd != null
         ? fmtTime(Math.max(0, Math.ceil((activeEnd - now) / 1000)))
         : '--';
     }
-    applyMute();
   }
 
   function onLevel(data) {
@@ -266,6 +296,7 @@
   }
 
   function start() {
+    startLoFi();
     if (window.Hls && Hls.isSupported()) {
       hls = new Hls({ enableWorker: true });
       hls.subtitleDisplay = false;
@@ -298,7 +329,8 @@
     soundOn = true;
     video.controls = true;
     disableSubtitles();
-    applyMute();
+    unlockLofi();
+    applyAudioLevels();
     video.play().catch(() => {});
     overlay.classList.add('hidden');
   });
