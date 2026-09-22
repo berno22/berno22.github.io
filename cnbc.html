@@ -157,13 +157,9 @@
     else if (adBreak && breakMode === 'mute') { cnbcVol = cnbcLow(); }
     // ads mode and normal programming: CNBC prominent at 1.0
 
-    // Apply CNBC level redundantly so it works on every browser:
-    //  - the Web Audio gain node covers iOS/edges,
-    //  - the element volume write covers desktop.
-    // The slider is restored to its pre-break value after the break.
-    if (boostCtx && cnbcGain) {
-      cnbcGain.gain.value = cnbcVol;
-    }
+    // Element volume is the AUTHORITATIVE level control (honored by desktop
+    // browsers). The Web Audio gain nodes are held at unity pass-through so
+    // they can never independently boost, mute, or double-attenuate the mix.
     if (cnbcVol < 1.0) {
       if (savedSlider === null) savedSlider = video.volume;
       video.volume = cnbcVol;
@@ -171,20 +167,17 @@
       video.volume = savedSlider;
       savedSlider = null;
     }
+    if (cnbcGain) cnbcGain.gain.value = 1.0;
 
-    // LoFi: muted element = guaranteed silence on every platform while the
-    // stream keeps playing. Unmuted only when prominent during a break.
+    // LoFi: muted element = silence; prominent = element volume 0.4 exactly.
     if (lofiProminent) {
       lofiEl.muted = false;
-      if (boostCtx && lofiGain) {
-        lofiEl.volume = 1.0;
-        lofiGain.gain.value = 0.4;
-      } else {
-        lofiEl.volume = 0.4;
-      }
+      lofiEl.volume = 0.4;
     } else {
       lofiEl.muted = true;
+      lofiEl.volume = 0;
     }
+    if (lofiGain) lofiGain.gain.value = 1.0;
     // LoFi never pauses: always streaming so it's instantly ready.
     if (lofiEl.src && lofiEl.paused) lofiEl.play().catch(() => {});
 
