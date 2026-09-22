@@ -226,10 +226,9 @@
       limiter.attack.value = 0.003; limiter.release.value = 0.25;
       media.connect(cnbcGain); cnbcGain.connect(gain);
       gain.connect(limiter); limiter.connect(ctx.destination);
-      const lofiMedia = ctx.createMediaElementSource(lofiEl);
-      lofiGain = ctx.createGain();
-      lofiGain.gain.value = 0;
-      lofiMedia.connect(lofiGain); lofiGain.connect(ctx.destination);
+      // LoFi is deliberately NOT routed through the graph: its radio servers
+      // omit CORS headers, and Chrome outputs silence for non-CORS-clean media
+      // in createMediaElementSource. It stays a plain element-volume element.
       boostCtx = ctx;
       boostActivated = true;
       return true;
