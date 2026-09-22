@@ -182,11 +182,16 @@
     if (lofiEl.src && lofiEl.paused) lofiEl.play().catch(() => {});
 
     // On-screen volume readout for testing: shows CNBC and LoFi levels as %
-    // of the raw stream, accounting for the 8x boost when it is active.
-    const cnbcShow = video.muted ? 0 : cnbcVol * 100;
+    // of the raw stream. CNBC includes the 8x boost gain when the Web Audio
+    // graph is actually running.
+    const cnbcShow = video.muted ? 0 : cnbcVol * 100 * (boostState() ? 8 : 1);
     const lofiShow = lofiEl.muted ? 0 : (lofiProminent ? 40 : CNBC_LOW * 100);
-    volcnbc.textContent = cnbcShow.toFixed(7) + '%';
-    vollofi.textContent = lofiShow.toFixed(7) + '%';
+    volcnbc.textContent = pct(cnbcShow);
+    vollofi.textContent = pct(lofiShow);
+  }
+  function pct(v) {
+    if (v === 0) return '0%';
+    return v.toFixed(7).replace(/\.?0+$/, '') + '%';
   }
 
   // 150% TV-audio boost, routed through Web Audio only after a real user
