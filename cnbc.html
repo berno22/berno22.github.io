@@ -119,9 +119,12 @@
 </div>
 <script>
   const video = document.getElementById('video');
-  // Safari plays HLS natively and its WebKit bug prevents createMediaElementSource
-  // from routing audio through the graph, so element volume is the only control
-  // there. Chrome/Firefox use hls.js+MSE where the gain node works.
+  // LoFi level discriminator: Real Safari (WebKit bug - no Web Audio routing
+  // for HLS, element volume only) gets 40%. Everything else - desktop Chrome,
+  // Tesla Chromium, Firefox - gets 70%. Tesla Chromium also reports native HLS,
+  // so we must NOT key off canPlayType('mpegurl') here.
+  const ua = navigator.userAgent;
+  const isRealSafari = /Safari/.test(ua) && !/Chrome|Chromium|CriOS|Edg|OPR|\bFirefox\b/.test(ua);
   const nativeHls = !!(video.canPlayType && video.canPlayType('application/vnd.apple.mpegurl'));
   const overlay = document.getElementById('overlay');
   const errBox = document.getElementById('err');
@@ -182,7 +185,7 @@
     }
 
     // LoFi target: prominent only during a lofi break.
-    const lofiLevel = nativeHls ? 0.4 : 0.6;
+    const lofiLevel = isRealSafari ? 0.4 : 0.7;
     const lofiProminent = !!(adBreak && breakMode === 'lofi');
     const lofiTarget = lofiProminent ? lofiLevel : 0;
 
