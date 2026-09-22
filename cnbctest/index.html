@@ -93,6 +93,12 @@
   #blockvid:hover { background: rgba(255,255,255,0.22); }
   #blockvid:active { transform: scale(0.95); }
   #blockvid.on { background: #fff; color: #111; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
+  #diag {
+    position: absolute; left: 18px; bottom: 18px;
+    width: 172px; height: 44px; z-index: 27;
+    border: 1px solid rgba(255,255,255,0.14); border-radius: 10px;
+    background: rgba(0,0,0,0.55);
+  }
 </style>
 </head>
 <body>
@@ -110,6 +116,7 @@
   </div>
   <div id="pread"></div>
   <button id="blockvid" type="button">Block Video</button>
+  <canvas id="diag"></canvas>
   <audio id="lofi" crossorigin="anonymous" preload="auto" playsinline></audio>
 </div>
 <script>
@@ -145,10 +152,47 @@
         panCtx.fillStyle = '#000';
         panCtx.fillRect(0, 0, cw, ch);
         panCtx.drawImage(video, (cw - w) / 2, (ch - h) / 2, w, h);
+        panCtx.fillStyle = '#0f0';
+        panCtx.font = '14px monospace';
+        const ds = String(Math.floor(Date.now() / 100) % 100000).padStart(5, '0');
+        panCtx.fillText(ds, 6, 18);
       } catch (e) {}
     }
     panRAF = requestAnimationFrame(pumpFrames);
   }
+  // DIAGNOSTIC: prove what survives in Drive. A setInterval-driven sweeping
+  // tape (timers + canvas drawing) plus live counters for interval ticks and
+  // rAF ticks. If the tape keeps sweeping in Drive, timers+canvas still work
+  // and only the <video> decode is blocked. If it freezes too, everything is.
+  const diag = document.getElementById('diag');
+  const diagCtx = diag ? diag.getContext('2d') : null;
+  if (diag) { diag.width = 172; diag.height = 44; }
+  const diagT0 = Date.now();
+  let diagIvTicks = 0;
+  let diagRafTicks = 0;
+  function tickDiagRaf() {
+    diagRafTicks++;
+    window.requestAnimationFrame(tickDiagRaf);
+  }
+  window.requestAnimationFrame(tickDiagRaf);
+  setInterval(() => {
+    diagIvTicks++;
+    if (!diag || !diagCtx) return;
+    const s = (Date.now() - diagT0) / 1000;
+    const w = diag.width, h = diag.height;
+    diagCtx.fillStyle = '#000';
+    diagCtx.fillRect(0, 0, w, h);
+    const x = (s * 40) % w;
+    diagCtx.fillStyle = '#7CFC00';
+    diagCtx.fillRect(x - 3, 0, 3, h);
+    diagCtx.font = '9px system-ui';
+    diagCtx.fillStyle = '#fff';
+    diagCtx.fillText('iv:' + diagIvTicks + ' rAF:' + diagRafTicks + ' s:' + Math.floor(s), 4, 9);
+    diagCtx.fillStyle = '#ff0';
+    diagCtx.fillText('tape sweeps = timers+canvas OK', 4, 21);
+    diagCtx.fillStyle = '#7CFC00';
+    diagCtx.fillText('video black = drive froze decode', 4, 33);
+  }, 100);
   const LOFI = ['https://radio.loficafe.net/listen/chilling/radio.mp3',
                 'https://radio.loficafe.net/listen/sleeping/radio.mp3',
                 'https://radio.loficafe.net/listen/working/radio.mp3',
