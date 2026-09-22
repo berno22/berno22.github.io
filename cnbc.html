@@ -124,7 +124,7 @@
       const ctx = new AudioContext();
       const media = ctx.createMediaElementSource(video);
       const gain = ctx.createGain();
-      gain.gain.value = 1.5;
+      gain.gain.value = 8.0;
       const limiter = ctx.createDynamicsCompressor();
       limiter.threshold.value = -2; limiter.knee.value = 0; limiter.ratio.value = 20;
       limiter.attack.value = 0.003; limiter.release.value = 0.25;
@@ -186,7 +186,7 @@
 
   function applyBreakAudio() {
     if (adBreak && breakMode === 'lofi') {
-      if (!lofiEl.src) { lofiEl.volume = 0.7; lofiEl.src = LOFI[0]; }
+      if (!lofiEl.src) { lofiEl.volume = 0.6; lofiEl.src = LOFI[0]; }
       if (lofiEl.paused) lofiEl.play().catch(() => {});
     } else if (!lofiEl.paused) {
       lofiEl.pause();
