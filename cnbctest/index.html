@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CNBC Stream · TEST</title>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
 <style>
   body { margin: 0; background: #000; color: #eee; font: 14px system-ui; }
   #wrap { position: fixed; inset: 0; }
@@ -144,14 +145,18 @@
   // Tesla freezes <video> presentation while driving (audio keeps flowing);
   // drawImage reads the decode pipeline, so the canvas keeps showing motion.
   function pumpFrames() {
-    if (pan && video.videoWidth > 0) {
+    if (pan && video.videoWidth > 0 && !WC.active) {
       try {
         const cw = pan.width, ch = pan.height;
-        const ratio = Math.min(cw / video.videoWidth, ch / video.videoHeight);
-        const w = video.videoWidth * ratio, h = video.videoHeight * ratio;
         panCtx.fillStyle = '#000';
         panCtx.fillRect(0, 0, cw, ch);
-        panCtx.drawImage(video, (cw - w) / 2, (ch - h) / 2, w, h);
+        // Drive sim: when blocked, drawImage would return black (Tesla froze
+        // the decode) - so skip it and leave black behind the counter.
+        if (!videoBlocked) {
+          const ratio = Math.min(cw / video.videoWidth, ch / video.videoHeight);
+          const w = video.videoWidth * ratio, h = video.videoHeight * ratio;
+          panCtx.drawImage(video, (cw - w) / 2, (ch - h) / 2, w, h);
+        }
         panCtx.fillStyle = '#0f0';
         panCtx.font = '14px monospace';
         const ds = String(Math.floor(Date.now() / 100) % 100000).padStart(5, '0');
@@ -166,7 +171,7 @@
   // and only the <video> decode is blocked. If it freezes too, everything is.
   const diag = document.getElementById('diag');
   const diagCtx = diag ? diag.getContext('2d') : null;
-  if (diag) { diag.width = 172; diag.height = 44; }
+  if (diag) { diag.width = 172; diag.height = 56; }
   const diagT0 = Date.now();
   let diagIvTicks = 0;
   let diagRafTicks = 0;
@@ -175,9 +180,12 @@
     window.requestAnimationFrame(tickDiagRaf);
   }
   window.requestAnimationFrame(tickDiagRaf);
+  let wcFps = 0, wcFpsLast = 0, wcFpsT = Date.now();
   setInterval(() => {
     diagIvTicks++;
     if (!diag || !diagCtx) return;
+    const nowMs = Date.now();
+    if (nowMs - wcFpsT >= 1000) { wcFps = WC.framesDrawn - wcFpsLast; wcFpsLast = WC.framesDrawn; wcFpsT = nowMs; }
     const s = (Date.now() - diagT0) / 1000;
     const w = diag.width, h = diag.height;
     diagCtx.fillStyle = '#000';
@@ -192,6 +200,12 @@
     diagCtx.fillText('tape sweeps = timers+canvas OK', 4, 21);
     diagCtx.fillStyle = '#7CFC00';
     diagCtx.fillText('video black = drive froze decode', 4, 33);
+    diagCtx.fillStyle = WC.active ? '#0f0' : '#f88';
+    diagCtx.fillText('wc:' + (WC.active ? 'ON' : 'off') + ' s:' + WC.samples
+                     + ' d:' + WC.framesDrawn + '/' + WC.framesDecoded
+                     + (WC.err ? ' ERR' : ''), 4, 43);
+    diagCtx.fillStyle = '#aaa';
+    diagCtx.fillText((WC.status || '').slice(0, 26), 4, 52);
   }, 100);
   const LOFI = ['https://radio.loficafe.net/listen/chilling/radio.mp3',
                 'https://radio.loficafe.net/listen/sleeping/radio.mp3',
@@ -476,16 +490,340 @@
     evaluateBreak();
   }
 
+  // ===== WebCodecs frame path =====
+  // Tesla freezes <video> decode in Drive, so that element can never give us a
+  // picture (drawImage returns black). But canvas+timers+fetch all keep running.
+  // Here we fetch the video variant playlist directly, demux its fMP4 segments
+  // with mp4box.js, decode H.264 with VideoDecoder, and paint frames to the
+  // canvas - no <video> pixels involved. Audio continues from the element.
+  const WC = {
+    mbox: null, dec: null, mux: null, active: false, haveInit: false, filePos: 0,
+    trackId: null, timescale: 90000, initUrl: null, fetchedInit: false, level: null,
+    fetchedTracks: false, anchor: null, buf: [], chunks: [], lastDrawn: null,
+    framesDecoded: 0, framesDrawn: 0, lastPlaylist: 0, segs: {}, feeding: false,
+    segQueue: [], plSegs: [], status: '', err: '', samples: 0
+  };
+  window.__WC = WC;
+  function wcNote(msg) {
+    WC.status = msg;
+    try { console.log('[WC]', msg); } catch (e) {}
+  }
+  const WC_LEVEL = 4; // 1280x720 variant (index into master m3u8)
+  const WC_POLL = 1200; // ms between playlist refreshes (segments are 4s)
+  // How far ahead of the audio clock to aim the fetched video (segment
+  // boundaries are 4s, we buffer ~1s beyond that for smoothness).
+  const WC_AIM = 2500;
+
+  // Rebuild the avcDecoderConfigurationRecord (VideoDecoder description) from
+  // the avcC box mp4box already parsed: version, profile/compat/level,
+  // lengthSizeMinusOne, SPS list, PPS list - exact byte order.
+  function wcBuildDesc(avcC) {
+    if (!avcC || !avcC.SPS || !avcC.PPS) return undefined;
+    const parts = [avcC.configurationVersion, avcC.AVCProfileIndication,
+                   avcC.profile_compatibility, avcC.AVCLevelIndication,
+                   0xFC | avcC.lengthSizeMinusOne, 0xE0 | avcC.SPS.length];
+    for (const s of avcC.SPS) {
+      parts.push(s.nalu.length >> 8 & 255, s.nalu.length & 255, ...s.nalu);
+    }
+    parts.push(avcC.PPS.length);
+    for (const p of avcC.PPS) {
+      parts.push(p.nalu.length >> 8 & 255, p.nalu.length & 255, ...p.nalu);
+    }
+    return new Uint8Array(parts);
+  }
+
+  function wcSetup(track) {
+    if (!window.VideoDecoder || !window.EncodedVideoChunk) { wcStop(); return; }
+    WC.timescale = track.timescale || 90000;
+    const codec = track.codec || 'avc1.64001f';
+    const desc = WC.description;
+    WC.dec = new VideoDecoder({
+      output: (frame) => {
+        WC.framesDecoded++;
+        // Anchor = audioClock - frameTs maps the audio element onto the frame
+        // timeline. Only update it when the estimate is steady (within 500ms of
+        // the last) - a burst of decode-ahead outputs would otherwise yank the
+        // clock to the future, prune everything in wcDraw, and freeze motion.
+        const est = video.currentTime * 1000000 - frame.timestamp;
+        if (WC.anchor == null || Math.abs(est - WC.anchor) < 500000) WC.anchor = est;
+        WC.buf.push(frame);
+        // Cap the rolling buffer; drop nothing else here - wcDraw prunes.
+        while (WC.buf.length > 60) {
+          const f = WC.buf.shift();
+          try { f.close(); } catch (e) {}
+        }
+      },
+      error: (e) => setError('vdec ' + e.message)
+    });
+    try {
+      const cfg = { codec };
+      if (desc) cfg.description = desc;
+      WC.dec.configure(cfg);
+      WC.active = true;
+    } catch (e) { setError('configure ' + e.message); wcStop(); }
+  }
+
+  function wcOnSamples(id, user, samples) {
+    if (!WC.dec || WC.dec.state !== 'configured') return;
+    WC.samples += samples.length;
+    // Keep the encoded samples, but don't decode here: feeding 120 at once
+    // makes the decoder burst them all out instantly (fast machines), then
+    // nothing for 4s until the next segment - the "1 frame per 4s" jolt.
+    // wcPace() forwards chunks to the decoder at realtime cadence instead.
+    for (const s of samples) {
+      if (!s.data || !s.data.byteLength) continue;
+      WC.chunks.push({
+        sync: !!s.is_sync,
+        ts: Math.max(0, Math.round(s.cts * 1000000 / WC.timescale)),
+        raw: new Uint8Array(s.data.buffer.slice(s.data.byteOffset, s.data.byteOffset + s.data.byteLength))
+      });
+    }
+  }
+
+  // Feed the decoder only as much as the display can consume in realtime:
+  // decode chunks whose timestamp is at most ~3.5s ahead of the audio clock,
+  // hold or drop the rest, and respect the decoder's own queue depth. Output
+  // frames then arrive continuously instead of in bursts.
+  function wcPace() {
+    if (!WC.dec || WC.dec.state !== 'configured' || !WC.chunks.length || WC.dec.decodeQueueSize > 120) return;
+    const now = video.currentTime * 1000000 - (WC.anchor || 0);
+    let i = 0;
+    for (; i < WC.chunks.length && WC.dec.decodeQueueSize < 120; i++) {
+      const c = WC.chunks[i];
+      if (c.ts < now - 6000000) continue;               // way past the clock: skip
+      if (WC.anchor != null && c.ts > now + 3500000) break; // too far ahead: wait
+      try {
+        WC.dec.decode(new EncodedVideoChunk({ type: c.sync ? 'key' : 'delta', timestamp: c.ts, data: c.raw }));
+      } catch (e) { WC.err = 'decode ' + e.message; setError(WC.err); break; }
+    }
+    if (i) WC.chunks.splice(0, i);
+  }
+
+  function wcFeed(buf) {
+    if (!WC.mbox) return;
+    try {
+      const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+      // mp4box 0.5.2 requires .fileStart attached to the ArrayBuffer itself.
+      const ab = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+      ab.fileStart = WC.filePos;
+      WC.mbox.appendBuffer(ab);
+      WC.filePos += ab.byteLength;
+      if (!WC.fetchedTracks) {
+        const info = WC.mbox.getInfo();
+        if (info && info.videoTracks && info.videoTracks.length) {
+          WC.fetchedTracks = true;
+          WC.trackId = info.videoTracks[0].id;
+          WC.mbox.setExtractionOptions(WC.trackId, null, { nbSamples: 100 });
+          WC.mbox.onSamples = wcOnSamples;
+          const e = WC.mbox.getTrackById(WC.trackId).mdia.minf.stbl.stsd.entries[0];
+          WC.description = wcBuildDesc(e && e.avcC);
+          // Without start(), mp4box never releases samples via onSamples.
+          WC.mbox.start();
+          wcSetup(info.videoTracks[0]);
+        }
+      }
+    } catch (e) { WC.err = 'mp4box ' + e.message; setError(WC.err); }
+  }
+
+  // Parse a variant playlist: init URL + segments with their program date/time
+  // (so we can aim fetches at the audio clock instead of the newest tail).
+  function wcParsePlaylist(text) {
+    const init = [], segs = [];
+    let pdt = null;
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (line.indexOf('#EXT-X-MAP:') === 0) {
+        const m = /URI="([^"]+)"/.exec(line);
+        if (m) init.push(m[1]);
+      } else if (line.indexOf('#EXT-X-PROGRAM-DATE-TIME:') === 0) {
+        pdt = Date.parse(line.slice(line.indexOf(':') + 1));
+      } else if (line.indexOf('#') !== 0) {
+        segs.push({ url: line, pdt });
+      }
+    }
+    return { init: init[0] || null, segs };
+  }
+
+  function wcPollPlaylist() {
+    if (!hls || !hls.levels || !hls.levels.length || !(WC.level != null)) return;
+    fetch(hls.levels[WC.level].url).then(r => r.text()).then(txt => {
+      const pl = wcParsePlaylist(txt);
+      WC.plSegs = pl.segs;
+      const initUrl = pl.init;
+      wcNote('poll: ' + pl.segs.length + ' segs, init=' + !!initUrl);
+      if (initUrl && (!WC.fetchedInit || initUrl !== WC.initUrl)) {
+        WC.initUrl = initUrl;
+        fetch(initUrl).then(r => r.arrayBuffer()).then(b => {
+          WC.initBytes = b;
+          WC.fetchedInit = true;
+          wcNote('init fetched ' + b.byteLength + 'B');
+          WC.feedInitToMbox(b);
+          wcEnqueueSegs();
+        }).catch(e => { WC.err = 'init fetch ' + e.message; setError(WC.err); });
+      } else if (WC.fetchedInit && WC.mbox) {
+        // Feed segments immediately after init so playback starts at once.
+        wcEnqueueSegs();
+      }
+    }).catch(e => { WC.err = 'playlist fetch ' + e.message; setError(WC.err); });
+  }
+
+  // Enqueue segments whose wall-clock content time matches where the audio
+// element is playing right now. Feeding the live edge gave us frames 4-8s
+// AHEAD of the audio clock, so nothing ever sat in the display window and only
+// the newest frame per segment got shown ("1 frame per segment"). Wall clock +
+// playlist programDateTimes align content with the live stream; the audio
+// element trails the edge by its buffer latency, so cover a span behind it.
+  const WC_SPAN = 9000; // ms of content to keep in flight behind the edge
+  function wcEnqueueSegs() {
+    if (!WC.plSegs.length) return;
+    const aim = programNow();
+    const minPdt = aim - WC_SPAN;
+    let anyPdt = false, picked = 0;
+    for (const s of WC.plSegs) {
+      if (!s.pdt) continue;
+      anyPdt = true;
+      if (s.pdt < minPdt || s.pdt > aim + 2000) continue;
+      if (WC.segs[s.url]) continue;
+      WC.segs[s.url] = true;
+      wcFetchSeg(s.url);
+      picked++;
+    }
+    // Fallback if the stream carries no program date/times: just the newest.
+    if (!anyPdt) {
+      const n = WC.plSegs.length;
+      for (let i = Math.max(0, n - 2); i < n; i++) {
+        const s = WC.plSegs[i];
+        if (WC.segs[s.url]) continue;
+        WC.segs[s.url] = true;
+        wcFetchSeg(s.url);
+      }
+    }
+  }
+
+  WC.feedInitToMbox = (b) => {
+    WC.mbox = MP4Box.createFile();
+    WC.fetchedTracks = false;
+    WC.description = undefined;
+    // Fresh mbox -> previously queued/fed segments are stale, drop them.
+    WC.segQueue = [];
+    WC.segs = {};
+    WC.chunks = [];
+    WC.filePos = 0; // the init is byte 0 of this new mbox
+    while (WC.buf.length) { try { WC.buf.pop().close(); } catch (e) {} }
+    WC.lastDrawn = null;
+    wcFeed(b);      // filePos advances past the init; segments follow
+  };
+
+  function wcFetchSeg(url) {
+    WC.segQueue.push(url);
+    if (!WC.feeding) wcNextSeg();
+  }
+  function wcNextSeg() {
+    if (!WC.segQueue.length) { WC.feeding = false; return; }
+    WC.feeding = true;
+    const url = WC.segQueue.shift();
+    fetch(url).then(r => r.arrayBuffer()).then(b => {
+      wcNote('fed seg ' + b.byteLength + 'B');
+      wcFeed(b);
+      setTimeout(wcNextSeg, 30);
+    }).catch(e => { WC.err = 'seg fetch ' + e.message; setError(WC.err); setTimeout(wcNextSeg, 300); });
+  }
+
+  // Draw the decoded frame closest to the audio clock, every tick. The audio
+  // clock is expressed in frame-ts units via WC.anchor (audioClock - frameTs).
+  // Holds a small rolling buffer so it never gate-waits: prune what's >500ms
+  // past the clock, pick the newest frame at or just ahead of it.
+  function wcDraw() {
+    if (!WC.active || !WC.buf.length) return;
+    const now = video.currentTime * 1000000 - (WC.anchor || 0);
+    let best = null;
+    for (let i = 0; i < WC.buf.length; i++) {
+      const f = WC.buf[i];
+      if (f.timestamp <= now + 500000 && (!best || f.timestamp > best.timestamp)) best = f;
+    }
+    if (!best) {
+      // everything is behind the clock; show the newest we have
+      for (const f of WC.buf) if (!best || f.timestamp > best.timestamp) best = f;
+    }
+    for (let i = WC.buf.length - 1; i >= 0; i--) {
+      if (WC.buf[i].timestamp < now - 500000) {
+        try { WC.buf[i].close(); } catch (e) {}
+        WC.buf.splice(i, 1);
+      }
+    }
+    if (!best || best === WC.lastDrawn) return;
+    WC.lastDrawn = best;
+    if (pan && pan.width > 0 && best.displayWidth > 0) {
+      try {
+        const ratio = Math.min(pan.width / best.displayWidth, pan.height / best.displayHeight);
+        const w = best.displayWidth * ratio, h = best.displayHeight * ratio;
+        panCtx.fillStyle = '#000';
+        panCtx.fillRect(0, 0, pan.width, pan.height);
+        panCtx.drawImage(best, (pan.width - w) / 2, (pan.height - h) / 2, w, h);
+        panCtx.fillStyle = '#0f0';
+        panCtx.font = '14px monospace';
+        const ds = String(Math.floor(Date.now() / 100) % 100000).padStart(5, '0');
+        panCtx.fillText(ds, 6, 18);
+        WC.framesDrawn++;
+      } catch (e) {}
+    }
+  }
+
+  function wcStart() {
+    if (!window.MP4Box) { wcNote('MP4Box missing'); setError('WC: MP4Box.js failed to load'); return; }
+    if (!window.VideoDecoder || !window.EncodedVideoChunk) {
+      const missing = ['VideoDecoder', 'EncodedVideoChunk'].filter(k => !(k in window)).join(',');
+      wcNote('WC interfaces missing: ' + missing);
+      setError('no WebCodecs VideoDecoder [' + (missing || 'unknown') + '] - Drive sim will go black');
+      return;
+    }
+    if (!hls || !hls.levels || !hls.levels.length) { wcNote('no hls levels'); setError('WC: no hls levels yet'); return; }
+    // Pick the best video variant: prefer 1280+ width, else the highest res.
+    const list = hls.levels;
+    let best = list.findIndex(l => l.width >= 1280 && l.videoCodec && l.videoCodec.indexOf('avc') >= 0);
+    if (best < 0) best = list.length - 1;
+    WC.level = best;
+    wcNote('start, level=' + best + ' ' + (list[best].width || '?') + 'x' + (list[best].height || '?') + ' ' + (list[best].videoCodec || ''));
+    WC.mbox = MP4Box.createFile();
+    wcPollPlaylist();
+    wcPollTimer = setInterval(wcPollPlaylist, WC_POLL);
+    wcTick();
+  }
+
+  // rAF-driven loop: paces decode to realtime, paints up to content framerate
+  // (no timer cap) when new decoded frames become pickable, and parks (no
+  // repaint of the same frame) otherwise.
+  function wcTick() {
+    if (WC.active) { wcPace(); wcDraw(); }
+    wcDrawTimer = requestAnimationFrame(wcTick);
+  }
+
+  function wcStop() {
+    try { if (wcPollTimer) clearInterval(wcPollTimer); } catch (e) {}
+    try { if (wcDrawTimer) cancelAnimationFrame(wcDrawTimer); } catch (e) {}
+    WC.active = false;
+    while (WC.buf.length) { try { WC.buf.pop().close(); } catch (e) {} }
+    WC.lastDrawn = null;
+    try { if (WC.dec) WC.dec.close(); } catch (e) {}
+    WC.dec = null;
+  }
+  let wcPollTimer = null, wcDrawTimer = null;
+
   function start() {
     startLoFi();
     if (window.Hls && Hls.isSupported()) {
-      hls = new Hls({ enableWorker: true });
+      hls = new Hls({ enableWorker: true, liveSyncDurationCount: 2, maxBufferLength: 8, backBufferLength: 60 });
       hls.subtitleDisplay = false;
       hls.subtitleTrack = -1;
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) setError(data.type + ': ' + data.details);
       });
-      hls.on(Hls.Events.MANIFEST_PARSED, tryAutoplay);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        tryAutoplay();
+        // Start WebCodecs frame pipeline once levels are known.
+        setTimeout(wcStart, 500);
+      });
       hls.on(Hls.Events.LEVEL_LOADED, (_, data) => onLevel(data));
       hls.on(Hls.Events.LEVEL_UPDATED, (_, data) => onLevel(data));
       hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, disableSubtitles);
@@ -515,12 +853,13 @@
     overlay.classList.add('hidden');
   });
 
-  // Simulate Tesla suppressing <video> presentation: keep the element playing
-  // (audio + decode continue) but hide it from view. The canvas keeps animating
-  // off the decode pipeline, so the picture should stay live.
+  // Simulate the Tesla Drive block: <video> keeps playing (audio flows) but
+  // the picture freezes to black. The video-based canvas pump goes black;
+  // timers, the diagnostics tape, and - crucially - the WebCodecs frame path
+  // (which does not read <video> pixels) all keep running. If the canvas still
+  // shows motion with "Video Blocked" on, the Drive fix works.
   blockBtn.addEventListener('click', () => {
     videoBlocked = !videoBlocked;
-    video.style.visibility = videoBlocked ? 'hidden' : 'visible';
     blockBtn.textContent = videoBlocked ? 'Video Blocked' : 'Block Video';
     blockBtn.classList.toggle('on', videoBlocked);
   });
