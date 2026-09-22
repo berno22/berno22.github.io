@@ -78,6 +78,21 @@
     padding: 4px 10px; border-radius: 999px; margin-top: 2px;
     background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.07);
   }
+  #blockvid {
+    position: absolute; top: 16px; right: 18px;
+    z-index: 26; cursor: pointer;
+    appearance: none; border: 1px solid rgba(255,255,255,0.14);
+    color: #e6e6e7; font: 700 12px/1 system-ui; letter-spacing: 1px;
+    text-transform: uppercase; padding: 10px 22px; border-radius: 999px;
+    background: rgba(0,0,0,0.45); backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    -webkit-tap-highlight-color: transparent;
+    transition: background .18s ease, transform .12s ease, color .18s ease;
+  }
+  #blockvid:hover { background: rgba(255,255,255,0.22); }
+  #blockvid:active { transform: scale(0.95); }
+  #blockvid.on { background: #fff; color: #111; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
 </style>
 </head>
 <body>
@@ -94,6 +109,7 @@
     <div id="adcount">--</div>
   </div>
   <div id="pread"></div>
+  <button id="blockvid" type="button">Block Video</button>
   <audio id="lofi" crossorigin="anonymous" preload="auto" playsinline></audio>
 </div>
 <script>
@@ -114,6 +130,8 @@
   const pread = document.getElementById('pread');
   const pan = document.getElementById('frame');
   const panCtx = pan.getContext('2d');
+  const blockBtn = document.getElementById('blockvid');
+  let videoBlocked = false;
   let panRAF = null;
   // Draw the video's DECODED frames onto the canvas every animation frame.
   // Tesla freezes <video> presentation while driving (audio keeps flowing);
@@ -451,6 +469,16 @@
     applyAudioLevels();
     video.play().catch(() => {});
     overlay.classList.add('hidden');
+  });
+
+  // Simulate Tesla suppressing <video> presentation: keep the element playing
+  // (audio + decode continue) but hide it from view. The canvas keeps animating
+  // off the decode pipeline, so the picture should stay live.
+  blockBtn.addEventListener('click', () => {
+    videoBlocked = !videoBlocked;
+    video.style.visibility = videoBlocked ? 'hidden' : 'visible';
+    blockBtn.textContent = videoBlocked ? 'Video Blocked' : 'Block Video';
+    blockBtn.classList.toggle('on', videoBlocked);
   });
 
   function sizePan() {
