@@ -213,7 +213,7 @@
       const gain = ctx.createGain();
       gain.gain.value = 8.0;
       const limiter = ctx.createDynamicsCompressor();
-      limiter.threshold.value = -2; limiter.knee.value = 0; limiter.ratio.value = 20;
+      limiter.threshold.value = 0; limiter.knee.value = 0; limiter.ratio.value = 20;
       limiter.attack.value = 0.003; limiter.release.value = 0.25;
       media.connect(cnbcGain); cnbcGain.connect(gain);
       gain.connect(limiter); limiter.connect(ctx.destination);
