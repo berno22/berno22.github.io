@@ -126,8 +126,18 @@
       else if (breakMode === 'mute') { cnbcVol = cnbcLow(); lofiVol = LOFI_LOW; }
       else { cnbcVol = 1.0; lofiVol = LOFI_LOW; } // ads: CNBC prominent
     }
-    video.volume = cnbcVol;
-    lofiEl.volume = lofiVol;
+    // Levels go through Web Audio gains when the graph exists (element
+    // .volume is ignored on iOS, so gains are the only reliable control).
+    // Fall back to element volume where there is no AudioContext.
+    if (boostCtx && cnbcGain && lofiGain) {
+      video.volume = 1.0;
+      lofiEl.volume = 1.0;
+      cnbcGain.gain.setTargetAtTime(cnbcVol, boostCtx.currentTime, 0.05);
+      lofiGain.gain.setTargetAtTime(lofiVol, boostCtx.currentTime, 0.05);
+    } else {
+      video.volume = cnbcVol;
+      lofiEl.volume = lofiVol;
+    }
     // LoFi never pauses: always streaming so it's instantly ready.
     if (lofiEl.src && lofiEl.paused) lofiEl.play().catch(() => {});
   }
@@ -143,17 +153,26 @@
   // gesture so autoplay never gets caught in a suspended AudioContext.
   let boostActivated = false;
   let boostCtx = null;
+  let cnbcGain = null;
+  let lofiGain = null;
   function enableBoost() {
     if (!window.AudioContext) return false;
     try {
       const ctx = new AudioContext();
       const media = ctx.createMediaElementSource(video);
+      cnbcGain = ctx.createGain();
+      cnbcGain.gain.value = 1.0;
       const gain = ctx.createGain();
       gain.gain.value = 8.0;
       const limiter = ctx.createDynamicsCompressor();
       limiter.threshold.value = -2; limiter.knee.value = 0; limiter.ratio.value = 20;
       limiter.attack.value = 0.003; limiter.release.value = 0.25;
-      media.connect(gain); gain.connect(limiter); limiter.connect(ctx.destination);
+      media.connect(cnbcGain); cnbcGain.connect(gain);
+      gain.connect(limiter); limiter.connect(ctx.destination);
+      const lofiMedia = ctx.createMediaElementSource(lofiEl);
+      lofiGain = ctx.createGain();
+      lofiGain.gain.value = LOFI_LOW;
+      lofiMedia.connect(lofiGain); lofiGain.connect(ctx.destination);
       boostCtx = ctx;
       // Flag only AFTER the graph is really built: a setup throw must not
       // leave the boost silently disengaged forever.
@@ -237,7 +256,7 @@
   // at the inaudible floor under CNBC so it's instantly ready when a break hits.
   function startLoFi() {
     lofiEl.muted = true;
-    lofiEl.volume = LOFI_LOW;
+    lofiEl.volume = 1.0; // muted pre-gesture; the gain node takes over post-graph
     if (!lofiEl.src) lofiEl.src = LOFI[lofiIndex];
     applyAudioLevels();
     lofiEl.play().catch(() => {});
