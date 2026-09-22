@@ -30,30 +30,6 @@
   #gotolive:hover { background: rgba(255,255,255,0.22); }
   #gotolive:active { transform: translateX(-50%) scale(0.95); }
   #gotolive.hidden { display: none; }
-  #simad {
-    position: absolute; bottom: 12px; right: 16px;
-    z-index: 25; cursor: pointer; user-select: none;
-    color: #fff; font: 700 11px/1 system-ui; letter-spacing: 1px; text-transform: uppercase;
-    padding: 9px 16px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14);
-    background: rgba(0,0,0,0.45); backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
-    transition: background .18s ease, transform .12s ease;
-  }
-  #simad:hover { background: rgba(255,255,255,0.22); }
-  #simad:active { transform: scale(0.95); }
-  #simad.on { background: #ffb300; color: #111; font-weight: 700; }
-  #volread {
-    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
-    z-index: 25; color: #e6e6e7; font: 600 12px/1 ui-monospace, Menlo, monospace;
-    letter-spacing: .5px; text-align: center; padding: 6px 14px; border-radius: 999px;
-    background: rgba(0,0,0,0.45); backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255,255,255,0.10);
-    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
-  }
-  #volread .vtag { color: #9a9da2; font: 600 9px/1 ui-monospace, Menlo, monospace; }
-  #volread b { color: #fff; font-weight: 700; }
   #pread {
     position: absolute; left: 18px; top: 50%; transform: translateY(-50%);
     z-index: 16; color: #b9bbbf; font: 700 13px/1 ui-monospace, Menlo, monospace;
@@ -105,8 +81,6 @@
   <video id="video" muted playsinline preload="auto"></video>
   <div id="overlay">Tap for sound</div>
   <button id="gotolive" class="hidden">Go LIVE</button>
-  <button id="simad">Sim AD</button>
-  <div id="volread"><span class="vtag">CNBC</span> <b>--</b> &nbsp;<span class="vtag">LOFI</span> <b>--</b></div>
   <div id="err"></div>
   <div id="adctl">
     <button class="seg" type="button" data-mode="lofi">LoFi</button>
@@ -133,11 +107,6 @@
   const lofiEl = document.getElementById('lofi');
   const adcount = document.getElementById('adcount');
   const pread = document.getElementById('pread');
-  const volread = document.getElementById('volread');
-  const volcnbc = volread.querySelectorAll('b')[0];
-  const vollofi = volread.querySelectorAll('b')[1];
-  const simad = document.getElementById('simad');
-  let simBreak = false;
   const LOFI = ['https://radio.loficafe.net/listen/chilling/radio.mp3',
                 'https://radio.loficafe.net/listen/sleeping/radio.mp3',
                 'https://radio.loficafe.net/listen/working/radio.mp3',
@@ -199,14 +168,6 @@
     if (cnbcGain) cnbcGain.gain.value = 1.0;
     // LoFi never pauses: always streaming so it's instantly ready.
     if (lofiEl.src && lofiEl.paused) lofiEl.play().catch(() => {});
-
-    // On-screen volume readout for testing: shows CURRENT levels as % of the
-    // raw stream. CNBC includes the 8x boost gain when the Web Audio graph is
-    // actually running.
-    const cnbcShow = video.muted ? 0 : video.volume * 100 * (boostState() ? 8 : 1);
-    const lofiShow = lofiEl.muted ? 0 : lofiEl.volume * 100;
-    volcnbc.textContent = pct(cnbcShow);
-    vollofi.textContent = pct(lofiShow);
   }
 
   const FADE_MS = 700;
@@ -227,10 +188,6 @@
       el.volume = from + (to - from) * t;
       if (t >= 1) { clearInterval(state.timer); state.timer = null; }
     }, 16);
-  }
-  function pct(v) {
-    if (v === 0) return '0%';
-    return v.toFixed(7).replace(/\.?0+$/, '') + '%';
   }
 
   // 150% TV-audio boost, routed through Web Audio only after a real user
@@ -395,8 +352,7 @@
         else if (now < w.start && (nextStart === null || w.start < nextStart)) nextStart = w.start;
       }
     }
-    adBreak = inside || simBreak;
-    if (adBreak && !inside && simBreak) activeEnd = null;
+    adBreak = inside;
     if (adBreak !== wasInAd) wasInAd = adBreak;
     adctl.classList.toggle('show', adBreak);
     if (adBreak) {
@@ -410,7 +366,7 @@
       // Pre-break: as soon as SCTE-35 publishes a future break, count down.
       adcount.textContent = '--';
       if (nextStart !== null) {
-        pread.textContent = 'AD in ' + fmtTime(Math.max(0, Math.ceil((nextStart - now) / 1000)));
+        pread.textContent = 'Ads in ' + fmtTime(Math.max(0, Math.ceil((nextStart - now) / 1000)));
         pread.classList.add('show');
       } else {
         pread.classList.remove('show');
@@ -471,14 +427,6 @@
     applyAudioLevels();
     video.play().catch(() => {});
     overlay.classList.add('hidden');
-  });
-
-  simad.addEventListener('click', (e) => {
-    e.stopPropagation();
-    simBreak = !simBreak;
-    simad.classList.toggle('on', simBreak);
-    simad.textContent = simBreak ? 'Sim AD·ON' : 'Sim AD';
-    evaluateBreak();
   });
 
   setInterval(evaluateBreak, 300);
