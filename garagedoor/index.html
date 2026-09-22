@@ -88,7 +88,7 @@ function hideLock(){document.getElementById("lock").style.display="none"}
 async function cmd(path,label,ask){if(ask&&!confirm(label+" the garage door?"))return;
 const m=document.getElementById("msg");m.textContent="sending…";
 try{const a=await fetch(API+path,{method:"POST",credentials:"include"});const j=await a.json();
-m.textContent=j.ok?"sent — watch the door":("failed: "+(j.error||a.status));}
+m.textContent=j.ok?"Triggered":("failed: "+(j.error||a.status));}
 catch(e){m.textContent="failed: no response";}setTimeout(()=>{m.textContent="";},6000);}
 document.getElementById("btnOpen").addEventListener("click",()=>cmd("/open","Open",true));
 document.getElementById("btnClose").addEventListener("click",()=>cmd("/close","Close",false));
