@@ -115,7 +115,7 @@
   // mute (never 0) so both streams stay live and instantly switchable.
   const CNBC_LOW = 0.0000001; // 0.00001%: floor above true mute, inaudible
   function cnbcLow() { return CNBC_LOW; }
-  const LOFI_LOW = 0.0000001; // 0.00001%: floor above true mute, inaudible
+  const LOFI_LOW = 0; // fully silent bed; only CNBC keeps the above-mute floor
 
   function applyAudioLevels() {
     video.muted = !soundOn;
