@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CNBC Stream · TEST</title>
-<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.7.1/dist/hls.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
 <style>
   body { margin: 0; background: #000; color: #eee; font: 14px system-ui; }
@@ -79,27 +79,6 @@
     padding: 4px 10px; border-radius: 999px; margin-top: 2px;
     background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.07);
   }
-  #blockvid {
-    position: absolute; top: 16px; right: 18px;
-    z-index: 26; cursor: pointer;
-    appearance: none; border: 1px solid rgba(255,255,255,0.14);
-    color: #e6e6e7; font: 700 12px/1 system-ui; letter-spacing: 1px;
-    text-transform: uppercase; padding: 10px 22px; border-radius: 999px;
-    background: rgba(0,0,0,0.45); backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
-    -webkit-tap-highlight-color: transparent;
-    transition: background .18s ease, transform .12s ease, color .18s ease;
-  }
-  #blockvid:hover { background: rgba(255,255,255,0.22); }
-  #blockvid:active { transform: scale(0.95); }
-  #blockvid.on { background: #fff; color: #111; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
-  #diag {
-    position: absolute; left: 18px; bottom: 18px;
-    width: 172px; height: 44px; z-index: 27;
-    border: 1px solid rgba(255,255,255,0.14); border-radius: 10px;
-    background: rgba(0,0,0,0.55);
-  }
 </style>
 </head>
 <body>
@@ -116,8 +95,6 @@
     <div id="adcount">--</div>
   </div>
   <div id="pread"></div>
-  <button id="blockvid" type="button">Block Video</button>
-  <canvas id="diag"></canvas>
   <audio id="lofi" crossorigin="anonymous" preload="auto" playsinline></audio>
 </div>
 <script>
@@ -138,8 +115,6 @@
   const pread = document.getElementById('pread');
   const pan = document.getElementById('frame');
   const panCtx = pan.getContext('2d');
-  const blockBtn = document.getElementById('blockvid');
-  let videoBlocked = false;
   let panRAF = null;
   // Draw the video's DECODED frames onto the canvas every animation frame.
   // Tesla freezes <video> presentation while driving (audio keeps flowing);
@@ -150,64 +125,13 @@
         const cw = pan.width, ch = pan.height;
         panCtx.fillStyle = '#000';
         panCtx.fillRect(0, 0, cw, ch);
-        // Drive sim: when blocked, drawImage would return black (Tesla froze
-        // the decode) - so skip it and leave black behind the counter.
-        if (!videoBlocked) {
-          const ratio = Math.min(cw / video.videoWidth, ch / video.videoHeight);
-          const w = video.videoWidth * ratio, h = video.videoHeight * ratio;
-          panCtx.drawImage(video, (cw - w) / 2, (ch - h) / 2, w, h);
-        }
-        panCtx.fillStyle = '#0f0';
-        panCtx.font = '14px monospace';
-        const ds = String(Math.floor(Date.now() / 100) % 100000).padStart(5, '0');
-        panCtx.fillText(ds, 6, 18);
+        const ratio = Math.min(cw / video.videoWidth, ch / video.videoHeight);
+        const w = video.videoWidth * ratio, h = video.videoHeight * ratio;
+        panCtx.drawImage(video, (cw - w) / 2, (ch - h) / 2, w, h);
       } catch (e) {}
     }
     panRAF = requestAnimationFrame(pumpFrames);
   }
-  // DIAGNOSTIC: prove what survives in Drive. A setInterval-driven sweeping
-  // tape (timers + canvas drawing) plus live counters for interval ticks and
-  // rAF ticks. If the tape keeps sweeping in Drive, timers+canvas still work
-  // and only the <video> decode is blocked. If it freezes too, everything is.
-  const diag = document.getElementById('diag');
-  const diagCtx = diag ? diag.getContext('2d') : null;
-  if (diag) { diag.width = 172; diag.height = 56; }
-  const diagT0 = Date.now();
-  let diagIvTicks = 0;
-  let diagRafTicks = 0;
-  function tickDiagRaf() {
-    diagRafTicks++;
-    window.requestAnimationFrame(tickDiagRaf);
-  }
-  window.requestAnimationFrame(tickDiagRaf);
-  let wcFps = 0, wcFpsLast = 0, wcFpsT = Date.now();
-  setInterval(() => {
-    diagIvTicks++;
-    if (!diag || !diagCtx) return;
-    const nowMs = Date.now();
-    if (nowMs - wcFpsT >= 1000) { wcFps = WC.framesDrawn - wcFpsLast; wcFpsLast = WC.framesDrawn; wcFpsT = nowMs; }
-    const s = (Date.now() - diagT0) / 1000;
-    const w = diag.width, h = diag.height;
-    diagCtx.fillStyle = '#000';
-    diagCtx.fillRect(0, 0, w, h);
-    const x = (s * 40) % w;
-    diagCtx.fillStyle = '#7CFC00';
-    diagCtx.fillRect(x - 3, 0, 3, h);
-    diagCtx.font = '9px system-ui';
-    diagCtx.fillStyle = '#fff';
-    diagCtx.fillText('iv:' + diagIvTicks + ' rAF:' + diagRafTicks + ' s:' + Math.floor(s), 4, 9);
-    diagCtx.fillStyle = '#ff0';
-    diagCtx.fillText('tape sweeps = timers+canvas OK', 4, 21);
-    diagCtx.fillStyle = '#7CFC00';
-    diagCtx.fillText('video black = drive froze decode', 4, 33);
-    diagCtx.fillStyle = WC.active ? '#0f0' : '#f88';
-    diagCtx.fillText('wc:' + (WC.active ? 'ON' : 'off') + ' s:' + WC.samples
-                     + ' d:' + WC.framesDrawn + '/' + WC.framesDecoded
-                     + ' f:' + WC.fps
-                     + (WC.err ? ' ERR' : ''), 4, 43);
-    diagCtx.fillStyle = '#aaa';
-    diagCtx.fillText((WC.status || '').slice(0, 26), 4, 52);
-  }, 100);
   const LOFI = ['https://radio.loficafe.net/listen/chilling/radio.mp3',
                 'https://radio.loficafe.net/listen/sleeping/radio.mp3',
                 'https://radio.loficafe.net/listen/working/radio.mp3',
@@ -491,34 +415,60 @@
     evaluateBreak();
   }
 
-  // ===== WebCodecs frame path =====
-  // Tesla freezes <video> decode in Drive, so that element can never give us a
-  // picture (drawImage returns black). But canvas+timers+fetch all keep running.
-  // Here we fetch the video variant playlist directly, demux its fMP4 segments
-  // with mp4box.js, decode H.264 with VideoDecoder, and paint frames to the
-  // canvas - no <video> pixels involved. Audio continues from the element.
+  // ===== Live frame path (WebCodecs, Drive-proof) =====
+  // The <video> element freezes in Drive, so this pipeline decodes a small
+  // video variant independently of it: fetch segments -> mp4box demux ->
+  // VideoDecoder -> 2-frame mailbox -> canvas @3fps.
+  //
+  // ONE design rule runs everything: all decisions happen in wall-clock
+  // program time (playlist PDT domain). Each fetched segment stamps its
+  // chunks with wallPdt = segPDT + cts-offset; the audio position comes
+  // straight from hls.playingDate. Codec timestamps are used ONLY for
+  // decode() ordering - never for sync - because ad splices rebase them
+  // and every ts<->wall map eventually lies. No anchors, no followers,
+  // no jumps, no deadlocks: with no interdependent clock state, decode
+  // simply cannot starve itself.
+  //
+  // Memory bound by construction: pend <=150 encoded chunks (~5s, each
+  // 10-100x smaller than decoded), box <=2 decoded 720p frames
+  // (~7MB), decoder queue <=6, fetch queue <=4 segments.
   const WC = {
-    mbox: null, dec: null, mux: null, active: false, haveInit: false, filePos: 0,
-    trackId: null, timescale: 90000, initUrl: null, fetchedInit: false, level: null,
-    fetchedTracks: false, anchor: null, anchorT: 0, buf: [], chunks: [], lastDrawn: null,
-    framesDecoded: 0, framesDrawn: 0, lastPlaylist: 0, segs: {}, feeding: false,
-    segQueue: [], plSegs: [], status: '', err: '', samples: 0, fps: 1, lastPaint: 0
+    mbox: null, dec: null, cfg: null, active: false,
+    filePos: 0, trackId: null, timescale: 90000,
+    initUrl: null, fetchedInit: false, level: null, fetchedTracks: false,
+    curSegPdt: 0, segFirstCts: -1, ts2w: null,
+    pend: [],          // encoded chunks awaiting decode: {sync, ts, wpdt, raw}
+    box: [],           // decoded mailbox: [{f, w}] newest <=2; rest closed
+    lastDrawn: null,   // {f, w} wrapper
+    framesDecoded: 0, framesDrawn: 0, samples: 0, dropped: 0,
+    fps: 1, lastPaint: 0, needKey: true, // paint ceiling: 1fps; retune live via __setFPS
+    segs: {}, segQueue: [], plSegs: [], feeding: false,
+    status: '', err: ''
   };
   window.__WC = WC;
-  // Live retune for the car (no redeploy): sets display framerate, buffer and
-  // pacing bounds are derived from it.
+  // Live retune for the car (no redeploy): paint ceiling, frames/second.
   window.__setFPS = (n) => {
-    WC.fps = Math.max(0.25, Math.min(30, +n || 1));
-    wcNote('fps -> ' + WC.fps);
+    WC.fps = Math.max(0, Math.min(30, +n || 0));
+    wcNote('fps -> ' + WC.fps + (WC.fps ? '' : ' (uncapped)'));
   };
   function wcNote(msg) {
     WC.status = msg;
     try { console.log('[WC]', msg); } catch (e) {}
   }
+  // Audio position as a wall-clock program time (ms): exactly what the
+  // audio hears, straight from hls.js - no mapping, no drift. Fallback is
+  // wall clock (assumes live edge) for the first seconds before playingDate
+  // exists.
+  function wcAudioPdt() {
+    try {
+      if (hls && hls.playingDate) {
+        const apdt = hls.playingDate.getTime();
+        if (isFinite(apdt)) return apdt;
+      }
+    } catch (e) {}
+    return Date.now();
+  }
   const WC_POLL = 1200; // ms between playlist refreshes (segments are 4s)
-  // Pacing bounds (derived from the display framerate in wcPace/wcDraw - kept
-  // small so a 720p buffer never balloons: at 1fps ~6 frames (~25MB) total).
-  const WC_BUFFERS = 6; // decoded frames to hold (was 60 - 220MB)
 
   // Rebuild the avcDecoderConfigurationRecord (VideoDecoder description) from
   // the avcC box mp4box already parsed: version, profile/compat/level,
@@ -541,82 +491,172 @@
   function wcSetup(track) {
     if (!window.VideoDecoder || !window.EncodedVideoChunk) { wcStop(); return; }
     WC.timescale = track.timescale || 90000;
-    const codec = track.codec || 'avc1.64001f';
-    const desc = WC.description;
-    WC.dec = new VideoDecoder({
-      output: (frame) => {
-        WC.framesDecoded++;
-        // Anchor = audioClock - frameTs maps the audio element onto the frame
-        // timeline. Follow slow real drift (~150ms/sec max) so hls live-edge
-        // re-syncs can't freeze it, but don't let a decode burst yank it.
-        const est = video.currentTime * 1000000 - frame.timestamp;
-        const nowPerf = performance.now();
-        const dt = Math.min(1, (nowPerf - (WC.anchorT || 0)) / 1000);
-        WC.anchorT = nowPerf;
-        if (WC.anchor == null) WC.anchor = est;
-        else WC.anchor += Math.max(-150000 * dt, Math.min(150000 * dt, est - WC.anchor));
-        WC.buf.push(frame);
-        // Cap the rolling buffer; drop nothing else here - wcDraw prunes.
-        while (WC.buf.length > WC_BUFFERS + 2) {
-          const f = WC.buf.shift();
-          try { f.close(); } catch (e) {}
-        }
-      },
-      error: (e) => setError('vdec ' + e.message)
-    });
+    WC.cfg = { codec: track.codec || 'avc1.64001f', desc: WC.description };
+    const cfg = { codec: WC.cfg.codec, optimizeForLatency: true };
+    if (WC.cfg.desc) cfg.description = WC.cfg.desc;
+    const go = () => {
+      try {
+        WC.dec = new VideoDecoder({ output: wcOnFrame, error: wcOnError });
+        WC.dec.configure(cfg);
+        WC.ts2w = new Map();
+        WC.active = true;
+        WC.needKey = true;
+        wcNote('decoder ready ' + WC.cfg.codec);
+      } catch (e) { setError('decoder configure: ' + e.message); wcStop(); }
+    };
     try {
-      const cfg = { codec };
-      if (desc) cfg.description = desc;
-      WC.dec.configure(cfg);
-      WC.active = true;
-    } catch (e) { setError('configure ' + e.message); wcStop(); }
+      if (window.VideoDecoder.isConfigSupported) {
+        window.VideoDecoder.isConfigSupported(cfg).then(
+          (r) => { if (r && r.supported) go(); else { setError('decoder config not supported'); wcStop(); } },
+          go);
+      } else go();
+    } catch (e) { go(); }
+  }
+
+  // A decode error (corrupt chunk, delta-without-key after a jump) is
+  // transient on live: rebuild the decoder and resume at the next keyframe.
+  // No red error box - the diag line keeps the note.
+  function wcOnError(e) {
+    wcNote('decoder error, rebuilding (' + (e && e.message) + ')');
+    wcRebuild();
+  }
+  function wcRebuild() {
+    WC._hreb = (WC._hreb || 0) + 1;
+    WC.ts2w = new Map(); // timestamps from the dead decoder mean nothing now
+    try { if (WC.dec) WC.dec.close(); } catch (e) {}
+    WC.dec = null;
+    while (WC.box.length) { try { WC.box.pop().f.close(); } catch (e) {} }
+    WC.needKey = true;
+    if (WC.cfg && window.VideoDecoder && window.EncodedVideoChunk) {
+      try {
+        const cfg = { codec: WC.cfg.codec, optimizeForLatency: true };
+        if (WC.cfg.desc) cfg.description = WC.cfg.desc;
+        WC.dec = new VideoDecoder({ output: wcOnFrame, error: wcOnError });
+        WC.dec.configure(cfg);
+      } catch (e) { setError('decoder rebuild: ' + e.message); wcStop(); }
+    }
+  }
+
+  function wcOnFrame(frame) {
+    WC.framesDecoded++;
+    WC._lastTs = frame.timestamp;
+    WC._lastOutT = performance.now();
+    // Recover this frame's wall time via its codec timestamp (feed order =
+    // decode order here, but B-frames can reorder output - map by ts).
+    let w = null;
+    if (WC.ts2w) {
+      if (WC.ts2w.has(frame.timestamp)) { w = WC.ts2w.get(frame.timestamp); WC.ts2w.delete(frame.timestamp); }
+      if (WC.ts2w.size > 40) WC.ts2w.clear(); // stale entries must not accumulate
+    }
+    if (w == null) w = wcAudioPdt(); // unknown: treat as current, draw decides
+    WC.box.push({ f: frame, w });
+    while (WC.box.length > 2) {
+      const o = WC.box.shift();
+      WC._hcap = (WC._hcap || 0) + 1;
+      try { o.f.close(); } catch (e) {}
+    }
   }
 
   function wcOnSamples(id, user, samples) {
-    if (!WC.dec || WC.dec.state !== 'configured') return;
+    if (!WC.mbox) return;
     WC.samples += samples.length;
-    // Keep the encoded samples, but don't decode here: feeding 120 at once
-    // makes the decoder burst them all out instantly (fast machines), then
-    // nothing for 4s until the next segment - the "1 frame per 4s" jolt.
-    // wcPace() forwards chunks to the decoder at realtime cadence instead.
+    // HLS segments must start with an IDR (ABR switching depends on it),
+    // so the first sample of each append is a key boundary even when the
+    // packager omits mp4box's is_sync flags (seen on some High-profile
+    // variants). Without this, key-wait drops the entire backlog.
+    let first = WC.segNew;
+    WC.segNew = false;
     for (const s of samples) {
       if (!s.data || !s.data.byteLength) continue;
-      WC.chunks.push({
-        sync: !!s.is_sync,
-        ts: Math.max(0, Math.round(s.cts * 1000000 / WC.timescale)),
+      const ts = Math.max(0, Math.round(s.cts * 1000000 / WC.timescale));
+      // Wall time of this chunk: the segment's playlist PDT plus the
+      // sample's offset inside the segment. Relative offsets are always
+      // valid even across ad-splice timestamp rebases; the absolute part
+      // comes straight from the playlist, never from a ts map.
+      if (WC.segFirstCts < 0) WC.segFirstCts = s.cts;
+      const w = (WC.curSegPdt || Date.now()) + (s.cts - WC.segFirstCts) * 1000 / WC.timescale;
+      if (WC.ts2w) WC.ts2w.set(ts, w);
+      const sync = !!s.is_sync || first;
+      first = false;
+      WC.pend.push({
+        sync, ts, wpdt: w,
         raw: new Uint8Array(s.data.buffer.slice(s.data.byteOffset, s.data.byteOffset + s.data.byteLength))
       });
     }
+    // Bound the encoded backlog (~5s at 30fps). Drop oldest first, keys
+    // included - fresh keys arrive with every GOP, and hoarding ancient
+    // keys is how stale-GOP decode churn starts.
+    while (WC.pend.length > 150) { WC.pend.shift(); WC.dropped++; if (WC._dr) WC._dr.cap++; }
   }
 
-  // Feed the decoder only as much as the display can consume: decode chunks no
-  // more than ~1.5s ahead of the audio clock, drop anything already far past
-  // it (so a stalled audio clock can't pile chunks without bound - that bloat
-  // is what made VideoDecoder die after a few minutes), and hold back when the
-  // decoder's own queue is deep. Bounds scale with the 1fps first test.
+  // Feed the decoder what the display can use: chunks near the audio
+  // position (wall ms). Backpressure (decoder queue depth + mailbox
+  // fullness) is the only pacing; a stall watchdog flushes wedges. There is deliberately NO clock-jump
+  // machinery here: the clock (playingDate) is authoritative, so a
+  // divergence means the FEED is wrong, never the clock - and the feed
+  // re-aims itself every poll. Nothing here can deadlock.
   function wcPace() {
-    if (!WC.dec || WC.dec.state !== 'configured' || !WC.chunks.length) return;
-    const now = video.currentTime * 1000000 - (WC.anchor || 0);
-    const lead = Math.max(1500000, WC.fps * 400000); // ~1.5s at low fps, more headroom as fps rises
-    const qmax = Math.max(6, Math.ceil(WC.fps * 6)); // decoder queue depth
-    if (WC.dec.decodeQueueSize > qmax) return;
-    // bound the encoded backlog: drop chunks that are already past the clock
-    let drop = 0;
-    while (drop < WC.chunks.length && WC.chunks[drop].ts < now - 1500000) drop++;
-    if (drop) WC.chunks.splice(0, drop);
-    let i = 0;
-    for (; i < WC.chunks.length && WC.dec.decodeQueueSize < qmax; i++) {
-      const c = WC.chunks[i];
-      if (WC.anchor != null && c.ts > now + lead) break; // too far ahead: wait
+    if (!WC.dec || WC.dec.state !== 'configured' || !WC.pend.length) return;
+    WC._dr = WC._dr || { past: 0, fut: 0, cap: 0, key: 0, boot: 0 };
+    const now = wcAudioPdt();
+    if (WC.needKey) {
+      // BEFORE any pruning: a decoder waiting for its first key must see
+      // fresh arrivals, not prune leftovers. If no key is present, WAIT
+      // (return with the backlog intact - prunes and the cap bound it);
+      // nuking the backlog here destroys the very keys we're waiting for.
+      let k = -1;
+      for (let i = 0; i < WC.pend.length; i++) {
+        if (WC.pend[i].sync) { k = i; break; }
+      }
+      if (k < 0) return;
+      WC.dropped += k;
+      WC._dr.key += k;
+      if (k) WC.pend.splice(0, k);
+      WC.needKey = false;
+    }
+    // Keep pend a small window near the audio position. Floor: never prune
+    // below 30 chunks, so a momentarily empty poll window can't starve the
+    // decoder while segments are in flight.
+    if (WC.pend.length > 30) {
+      let p = 0;
+      while (p < WC.pend.length - 30 && WC.pend[p].wpdt < now - 500) p++;
+      // Walk back to the most recent keyframe: the backlog head must always
+      // be a key, or the decoder hits delta-without-key errors and rebuilds
+      // in a churn loop. A stale head key costs one wasted GOP at most.
+      if (p > 0) {
+        let j = p;
+        while (j > 0 && !WC.pend[j].sync) j--;
+        p = j;
+      }
+      if (p) { WC.dropped += p; WC._dr.past += p; WC.pend.splice(0, p); }
+      let q = WC.pend.length;
+      while (q > 30 && WC.pend[q - 1].wpdt > now + 4000) q--;
+      if (q < WC.pend.length) { WC.dropped += WC.pend.length - q; WC._dr.fut += WC.pend.length - q; WC.pend.length = q; }
+    }
+    if (!WC.pend.length) return;
+    let fed = 0;
+    // One chunk per tick is plenty (60/s capability vs 3/s draw): with the
+    // 2-deep box: feeding more than freed just churns the mailbox.
+    while (WC.pend.length && WC.dec.decodeQueueSize < 6 && WC.box.length < 2 && fed < 1) {
+      const c = WC.pend[0];
+      if (c.wpdt > now + 1000) break; // ahead of the audio: wait for it
       try {
         WC.dec.decode(new EncodedVideoChunk({ type: c.sync ? 'key' : 'delta', timestamp: c.ts, data: c.raw }));
-      } catch (e) { WC.err = 'decode ' + e.message; setError(WC.err); break; }
+      } catch (e) { WC._lastDecodeErr = (e && e.name || '?') + ': ' + (e && e.message || '?'); wcRebuild(); break; }
+      WC.pend.shift();
+      fed++;
     }
-    if (i) WC.chunks.splice(0, i);
   }
 
-  function wcFeed(buf) {
+  function wcFeed(buf, pdt) {
     if (!WC.mbox) return;
+    // Stamp the segment's playlist PDT: every sample demuxed from this
+    // append gets wallPdt = segPDT + in-segment offset (see wcOnSamples).
+    // Appends are strictly serial (segQueue), so samples always belong to
+    // the most recently appended segment.
+    WC.curSegPdt = pdt || Date.now();
+    WC.segFirstCts = -1;
+    WC.segNew = true; // first sample of this append is a segment boundary
     try {
       const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
       // mp4box 0.5.2 requires .fileStart attached to the ArrayBuffer itself.
@@ -642,7 +682,7 @@
   }
 
   // Parse a variant playlist: init URL + segments with their program date/time
-  // (so we can aim fetches at the audio clock instead of the newest tail).
+  // (so fetches aim at the live edge instead of re-downloading history).
   function wcParsePlaylist(text) {
     const init = [], segs = [];
     let pdt = null;
@@ -667,52 +707,67 @@
       const pl = wcParsePlaylist(txt);
       WC.plSegs = pl.segs;
       const initUrl = pl.init;
-      wcNote('poll: ' + pl.segs.length + ' segs, init=' + !!initUrl);
       if (initUrl && (!WC.fetchedInit || initUrl !== WC.initUrl)) {
         WC.initUrl = initUrl;
-        fetch(initUrl).then(r => r.arrayBuffer()).then(b => {
+        fetch(initUrl).then(r => {
+          if (!r.ok) throw new Error('http ' + r.status);
+          return r.arrayBuffer();
+        }).then(b => {
           WC.initBytes = b;
           WC.fetchedInit = true;
-          wcNote('init fetched ' + b.byteLength + 'B');
+          wcFetchOk();
           WC.feedInitToMbox(b);
           wcEnqueueSegs();
-        }).catch(e => { WC.err = 'init fetch ' + e.message; setError(WC.err); });
+        }).catch(e => wcFetchFail('init fetch ' + (e && e.message || e)));
       } else if (WC.fetchedInit && WC.mbox) {
-        // Feed segments immediately after init so playback starts at once.
         wcEnqueueSegs();
       }
-    }).catch(e => { WC.err = 'playlist fetch ' + e.message; setError(WC.err); });
+    }).catch(e => wcFetchFail('playlist fetch ' + (e && e.message || e)));
   }
 
-  // Enqueue segments whose wall-clock content time matches where the audio
-// element is playing right now. Feeding the live edge gave us frames 4-8s
-// AHEAD of the audio clock, so nothing ever sat in the display window and only
-// the newest frame per segment got shown ("1 frame per segment"). Wall clock +
-// playlist programDateTimes align content with the live stream; the audio
-// element trails the edge by its buffer latency, so cover a span behind it.
-  const WC_SPAN = 9000; // ms of content to keep in flight behind the edge
+  // Enqueue segments near the AUDIO position (lip-sync), read directly as
+  // hls.playingDate - the program date of what the audio hears. No ts<->PDT
+  // math: playingDate is already in the playlist's PDT domain. Clamped into
+  // the DVR window; if audio fell out of the window, take the live edge
+  // (audio will jump forward to it via liveMaxLatencyDurationCount, and the
+  // freshly fetched content is instantly decodable - no clock to repair).
   function wcEnqueueSegs() {
     if (!WC.plSegs.length) return;
-    const aim = programNow();
-    const minPdt = aim - WC_SPAN;
-    let anyPdt = false, picked = 0;
+    const live = programNow();
+    let aim = live;
+    try {
+      const apdt = hls && hls.playingDate ? hls.playingDate.getTime() : NaN;
+      const oldest = (WC.plSegs[0] && WC.plSegs[0].pdt) || 0;
+      if (isFinite(apdt) && oldest && apdt > oldest + 4000) aim = Math.min(apdt, live);
+    } catch (e) {}
+    WC._dbgAim = aim;
+    WC._dbgNpl = WC.plSegs.length;
+    WC._dbgFirst = (WC.plSegs[0] && WC.plSegs[0].pdt) || 0;
+    WC._dbgLast = (WC.plSegs[WC.plSegs.length - 1] && WC.plSegs[WC.plSegs.length - 1].pdt) || 0;
+    WC._dbgMatched = 0;
+    const minPdt = aim - 8000;
+    let anyPdt = false;
     for (const s of WC.plSegs) {
       if (!s.pdt) continue;
       anyPdt = true;
-      if (s.pdt < minPdt || s.pdt > aim + 2000) continue;
+      // Compare against segment START: a 4s segment starting at aim+1s
+      // already covers content to aim+5s. Bounding starts to +1s keeps the
+      // backlog head near now; the tail trim below absorbs the rest.
+      if (s.pdt < minPdt || s.pdt > aim + 1000) continue;
       if (WC.segs[s.url]) continue;
+      if (WC.segQueue.length >= 4) break; // bounded: retry on next poll
       WC.segs[s.url] = true;
-      wcFetchSeg(s.url);
-      picked++;
+      WC._dbgMatched++;
+      wcFetchSeg(s.url, s.pdt);
     }
     // Fallback if the stream carries no program date/times: just the newest.
     if (!anyPdt) {
       const n = WC.plSegs.length;
-      for (let i = Math.max(0, n - 2); i < n; i++) {
+      for (let i = Math.max(0, n - 2); i < n && WC.segQueue.length < 4; i++) {
         const s = WC.plSegs[i];
         if (WC.segs[s.url]) continue;
         WC.segs[s.url] = true;
-        wcFetchSeg(s.url);
+        wcFetchSeg(s.url, s.pdt);
       }
     }
   }
@@ -724,69 +779,117 @@
     // Fresh mbox -> previously queued/fed segments are stale, drop them.
     WC.segQueue = [];
     WC.segs = {};
-    WC.chunks = [];
+    WC.pend = [];
+    WC.ts2w = new Map();
+    WC.curSegPdt = 0;
+    WC.segFirstCts = -1;
+    WC.needKey = true;
     WC.filePos = 0; // the init is byte 0 of this new mbox
-    while (WC.buf.length) { try { WC.buf.pop().close(); } catch (e) {} }
+    while (WC.box.length) { try { WC.box.pop().f.close(); } catch (e) {} }
+    if (WC.lastDrawn) { try { WC.lastDrawn.f.close(); } catch (e) {} }
     WC.lastDrawn = null;
-    wcFeed(b);      // filePos advances past the init; segments follow
+    wcFeed(b, 0);     // filePos advances past the init; segments follow
   };
 
-  function wcFetchSeg(url) {
-    WC.segQueue.push(url);
+  function wcFetchSeg(url, pdt) {
+    WC.segQueue.push({ url, pdt: pdt || 0, tries: 0 });
     if (!WC.feeding) wcNextSeg();
+  }
+  // Sequential fetch chain with quiet retries: a failed segment is retried
+  // (requeued at the end so others keep flowing), then skipped - a 4s hole
+  // in video beats a stuck pipeline. Fetch errors never raise the red box;
+  // the status line notes them and success clears them.
+  function wcFetchFail(msg) {
+    if (++fetchFailCount >= 3) setError(msg);
+    else wcNote(msg + ' (retrying)');
+  }
+  function wcFetchOk() {
+    fetchFailCount = 0;
+    if (errBox && /^Error: (seg|playlist|init) fetch/.test(errBox.textContent)) errBox.textContent = '';
   }
   function wcNextSeg() {
     if (!WC.segQueue.length) { WC.feeding = false; return; }
     WC.feeding = true;
-    const url = WC.segQueue.shift();
-    fetch(url).then(r => r.arrayBuffer()).then(b => {
-      wcNote('fed seg ' + b.byteLength + 'B');
-      wcFeed(b);
+    const job = WC.segQueue.shift();
+    fetch(job.url).then(r => {
+      if (!r.ok) throw new Error('http ' + r.status);
+      return r.arrayBuffer();
+    }).then(b => {
+      wcFeed(b, job.pdt);
+      wcFetchOk();
       setTimeout(wcNextSeg, 30);
-    }).catch(e => { WC.err = 'seg fetch ' + e.message; setError(WC.err); setTimeout(wcNextSeg, 300); });
+    }).catch(e => {
+      const msg = 'seg fetch ' + (e && e.message || e);
+      if ((job.tries || 0) < 3) {
+        job.tries = (job.tries || 0) + 1;
+        WC.segQueue.push(job); // to the end: others keep flowing meanwhile
+        wcFetchFail(msg);
+        setTimeout(wcNextSeg, 500 * job.tries);
+      } else {
+        wcFetchFail(msg + ' (skipped)');
+        setTimeout(wcNextSeg, 30);
+      }
+    });
   }
 
-  // Draw the decoded frame closest to the audio clock at the configured
-  // framerate (default 1fps for the first Tesla soak test). The audio clock
-  // is expressed in frame-ts units via WC.anchor (audioClock - frameTs). The
-  // buffer is pruned every tick so memory stays tight even when we're only
-  // painting one frame a second.
+  // Paint the decoded frame nearest the audio position (wall ms), at most
+  // WC.fps times per second (3fps default: H.264 needs the full decode
+  // chain for correct motion, but only every ~10th frame hits the canvas).
+  // Frames leave the mailbox when drawn, so nothing paints twice and the
+  // small box throttles decode to the same trickle via backpressure.
+  // WC._syncMs tracks |painted - audio| for the soak harness: that number
+  // IS the lip-sync error, measured live.
   function wcDraw() {
-    if (!WC.active || !WC.buf.length) return;
-    const now = video.currentTime * 1000000 - (WC.anchor || 0);
-    for (let i = WC.buf.length - 1; i >= 0; i--) {
-      if (WC.buf[i].timestamp < now - 500000) {
-        try { WC.buf[i].close(); } catch (e) {}
-        WC.buf.splice(i, 1);
+    if (!WC.active) return;
+    if (!WC.box.length) { WC._hempty = (WC._hempty || 0) + 1; return; }
+    if (!WC._h) WC._h = { thr: 0, hold: 0, same: 0, painted: 0, pruned: 0, att: 0, noguard: 0, threw: 0 };
+    // fps gate FIRST (before selection): lastPaint moves only on real
+    // paints, so throttled ticks never starve future ones.
+    if (WC.fps > 0 && performance.now() - WC.lastPaint < 1000 / WC.fps) { WC._h.thr++; return; }
+    const now = wcAudioPdt();
+    for (let i = WC.box.length - 1; i >= 0; i--) {
+      if (WC.box[i].w < now - 1000) {
+        WC._h.pruned++;
+        WC._h.pruneAge = (WC._h.pruneAge || 0) + (now - WC.box[i].w);
+        try { WC.box[i].f.close(); } catch (e) {}
+        WC.box.splice(i, 1);
       }
     }
-    if (performance.now() - WC.lastPaint < 1000 / WC.fps) return;
-    let best = null;
-    for (let i = 0; i < WC.buf.length; i++) {
-      const f = WC.buf[i];
-      if (f.timestamp <= now + 500000 && (!best || f.timestamp > best.timestamp)) best = f;
+    let bi = -1;
+    for (let i = 0; i < WC.box.length; i++) {
+      if (WC.box[i].w <= now + 250) bi = i;
     }
-    if (!best) {
-      // everything is behind the clock; show the newest we have
-      for (const f of WC.buf) if (!best || f.timestamp > best.timestamp) best = f;
+    if (bi < 0) {
+      let bestDt = Infinity;
+      for (let i = 0; i < WC.box.length; i++) {
+        const d = Math.abs(WC.box[i].w - now);
+        if (d < bestDt) { bestDt = d; bi = i; }
+      }
     }
-    if (!best || best === WC.lastDrawn) return;
-    WC.lastPaint = performance.now();
+    if (bi < 0) { WC._h.hold++; return; } // unreachable: box non-empty
+    const best = WC.box[bi];
+    WC.box.splice(bi, 1);
+    if (WC.lastDrawn) { try { WC.lastDrawn.f.close(); } catch (e) {} }
     WC.lastDrawn = best;
-    if (pan && pan.width > 0 && best.displayWidth > 0) {
+    WC._h.att++;
+    WC._syncMs = Math.abs(best.w - now);
+    const frame = best.f;
+    if (pan && pan.width > 0 && frame.displayWidth > 0) {
       try {
-        const ratio = Math.min(pan.width / best.displayWidth, pan.height / best.displayHeight);
-        const w = best.displayWidth * ratio, h = best.displayHeight * ratio;
+        const ratio = Math.min(pan.width / frame.displayWidth, pan.height / frame.displayHeight);
+        const w = frame.displayWidth * ratio, h = frame.displayHeight * ratio;
         panCtx.fillStyle = '#000';
         panCtx.fillRect(0, 0, pan.width, pan.height);
-        panCtx.drawImage(best, (pan.width - w) / 2, (pan.height - h) / 2, w, h);
-        panCtx.fillStyle = '#0f0';
-        panCtx.font = '14px monospace';
-        const ds = String(Math.floor(Date.now() / 100) % 100000).padStart(5, '0');
-        panCtx.fillText(ds, 6, 18);
+        panCtx.drawImage(frame, (pan.width - w) / 2, (pan.height - h) / 2, w, h);
+        WC.lastPaint = performance.now();
         WC.framesDrawn++;
-      } catch (e) {}
-    }
+        WC._h.painted++;
+      } catch (e) {
+        WC._h.threw++;
+        try { frame.close(); } catch (_) {}
+        WC.lastDrawn = null;
+      }
+    } else WC._h.noguard++;
   }
 
   function wcStart() {
@@ -798,23 +901,62 @@
       return;
     }
     if (!hls || !hls.levels || !hls.levels.length) { wcNote('no hls levels'); setError('WC: no hls levels yet'); return; }
-    // Pick the best video variant: prefer 1280+ width, else the highest res.
+    // Decode 720p at 30fps (not 60): identical pixels and sharpness, half
+    // the feed/demux/drop churn - at ~1fps display the extra 30fps is pure
+    // waste. Highest bitrate among the <=30fps 720p AVC rungs for clean
+    // motion (pixelation on movement is bitrate starvation, not resolution).
     const list = hls.levels;
-    let best = list.findIndex(l => l.width >= 1280 && l.videoCodec && l.videoCodec.indexOf('avc') >= 0);
-    if (best < 0) best = list.length - 1;
+    let best = -1, bestBw = -1;
+    for (let i = 0; i < list.length; i++) {
+      const l = list[i];
+      const h = l.height || 0;
+      const fr = l.frameRate || 0;
+      if (h >= 480 && h <= 720 && l.videoCodec && l.videoCodec.indexOf('avc') >= 0 &&
+          (fr <= 0 || fr <= 30) && (l.bitrate || 0) > bestBw) { bestBw = l.bitrate || 0; best = i; }
+    }
+    if (best < 0) {
+      for (let i = 0; i < list.length; i++) {
+        const l = list[i];
+        const h = l.height || 0;
+        if (h >= 480 && h <= 720 && l.videoCodec && l.videoCodec.indexOf('avc') >= 0) {
+          if ((l.bitrate || 0) > bestBw) { bestBw = l.bitrate || 0; best = i; }
+        }
+      }
+    }
+    if (best < 0) best = 0;
     WC.level = best;
     wcNote('start, level=' + best + ' ' + (list[best].width || '?') + 'x' + (list[best].height || '?') + ' ' + (list[best].videoCodec || ''));
     WC.mbox = MP4Box.createFile();
+    WC._startT = performance.now();
+    WC._lastOutT = 0;
     wcPollPlaylist();
     wcPollTimer = setInterval(wcPollPlaylist, WC_POLL);
     wcTick();
   }
 
-  // rAF-driven loop: paces decode to realtime, paints up to content framerate
-  // (no timer cap) when new decoded frames become pickable, and parks (no
-  // repaint of the same frame) otherwise.
+  // Stall watchdog (the anti-clobber insurance): if the decoder emits
+  // nothing for 8s while content waits, drain it gently with flush() and
+  // resume at the next keyframe. This fires only on a genuine wedge -
+  // unlike a blind periodic flush, a healthy pipeline never glitches.
+  // (A blind flush every 30s would freeze the picture each time: post-flush
+  // the decoder requires a key, so we'd sit out up to a GOP waiting.)
+  function wcWatchdog() {
+    if (!WC.active || !WC.dec || WC.dec.state !== 'configured' || !WC.pend.length) return;
+    const sinceOut = performance.now() - (WC._lastOutT || WC._startT || performance.now());
+    if (sinceOut < 8000) return;
+    try {
+      const p = WC.dec.flush();
+      if (p && p.catch) p.catch(() => {});
+    } catch (e) {}
+    WC.needKey = true;
+    WC._lastOutT = performance.now();
+    wcNote('watchdog flush: no output for ' + Math.round(sinceOut / 1000) + 's');
+  }
+
+  // rAF loop: feed-while-hungry, paint-while-due, watch for stalls.
   function wcTick() {
-    if (WC.active) { wcPace(); wcDraw(); }
+    WC.ticks = (WC.ticks || 0) + 1;
+    if (WC.active) { wcPace(); wcDraw(); wcWatchdog(); }
     wcDrawTimer = requestAnimationFrame(wcTick);
   }
 
@@ -822,25 +964,58 @@
     try { if (wcPollTimer) clearInterval(wcPollTimer); } catch (e) {}
     try { if (wcDrawTimer) cancelAnimationFrame(wcDrawTimer); } catch (e) {}
     WC.active = false;
-    while (WC.buf.length) { try { WC.buf.pop().close(); } catch (e) {} }
+    while (WC.box.length) { try { WC.box.pop().f.close(); } catch (e) {} }
+    if (WC.lastDrawn) { try { WC.lastDrawn.f.close(); } catch (e) {} }
     WC.lastDrawn = null;
+    WC.pend = [];
+    WC.ts2w = null;
     try { if (WC.dec) WC.dec.close(); } catch (e) {}
     WC.dec = null;
   }
   let wcPollTimer = null, wcDrawTimer = null;
 
+
   function start() {
     startLoFi();
     if (window.Hls && Hls.isSupported()) {
-      hls = new Hls({ enableWorker: true, liveSyncDurationCount: 2, maxBufferLength: 8, backBufferLength: 60 });
+      // Small MSE footprint for the car: ~12s forward buffer, 25MB cap,
+      // 45s back buffer, ABR capped to <=480p below, FPS-drop capping on.
+      hls = new Hls({
+        enableWorker: true,
+        liveSyncDurationCount: 3,
+        // Cap how far audio may trail live (~24s): beyond this hls.js jumps
+        // forward. Without a cap a slow join/stall leaves audio minutes
+        // behind live forever - and video glued to that audio starves, since
+        // the playlist DVR window only holds so much history.
+        liveMaxLatencyDurationCount: 6,
+        maxBufferLength: 12,
+        maxBufferSize: 25 * 1000 * 1000,
+        maxMaxBufferLength: 60,
+        backBufferLength: 45,
+        lowLatencyMode: false,
+        capLevelToPlayerSize: true,
+        capLevelOnFPSDrop: true,
+        abrEwmaDefaultEstimate: 400000
+      });
       hls.subtitleDisplay = false;
       hls.subtitleTrack = -1;
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) setError(data.type + ': ' + data.details);
       });
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        // Deterministic <=480p cap for the car's CPU/RAM (element-size
+        // capping alone is not deterministic).
+        try {
+          let cap = -1;
+          for (let i = 0; i < hls.levels.length; i++) {
+            const h = hls.levels[i].height || 0;
+            if (h > 0 && h <= 480) cap = i;
+          }
+          if (cap < 0) cap = 0;
+          hls.autoLevelCapping = cap;
+        } catch (e) {}
         tryAutoplay();
-        // Start WebCodecs frame pipeline once levels are known.
+        // Start the Drive-proof frame pipeline once levels are known.
         setTimeout(wcStart, 500);
       });
       hls.on(Hls.Events.LEVEL_LOADED, (_, data) => onLevel(data));
@@ -870,17 +1045,6 @@
     applyAudioLevels();
     video.play().catch(() => {});
     overlay.classList.add('hidden');
-  });
-
-  // Simulate the Tesla Drive block: <video> keeps playing (audio flows) but
-  // the picture freezes to black. The video-based canvas pump goes black;
-  // timers, the diagnostics tape, and - crucially - the WebCodecs frame path
-  // (which does not read <video> pixels) all keep running. If the canvas still
-  // shows motion with "Video Blocked" on, the Drive fix works.
-  blockBtn.addEventListener('click', () => {
-    videoBlocked = !videoBlocked;
-    blockBtn.textContent = videoBlocked ? 'Video Blocked' : 'Block Video';
-    blockBtn.classList.toggle('on', videoBlocked);
   });
 
   function sizePan() {
