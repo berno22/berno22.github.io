@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CNBC Stream · TEST</title>
+<title>CNBC InMotion</title>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.7.1/dist/hls.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
 <style>
@@ -116,6 +116,22 @@
   const pan = document.getElementById('frame');
   const panCtx = pan.getContext('2d');
   let panRAF = null;
+  // Lock screen / miniplayer: always advertise CNBC, never the LoFi bed.
+  // Media Session metadata is page-level: whatever session the OS surfaces
+  // shows this branding. Play/pause keys drive the main element (pause
+  // surfaces the Go LIVE button via the existing watcher).
+  if ('mediaSession' in navigator) {
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'CNBC InMotion',
+        artist: 'CNBC',
+        album: 'Live TV',
+        artwork: [{ src: '../cnbcaudio/cnbc-logo.png', sizes: '900x506', type: 'image/png' }]
+      });
+      navigator.mediaSession.setActionHandler('play', () => { video.play().catch(() => {}); });
+      navigator.mediaSession.setActionHandler('pause', () => { try { video.pause(); } catch (e) {} });
+    } catch (e) {}
+  }
   // Draw the video's DECODED frames onto the canvas every animation frame.
   // Tesla freezes <video> presentation while driving (audio keeps flowing);
   // drawImage reads the decode pipeline, so the canvas keeps showing motion.
