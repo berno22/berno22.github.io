@@ -415,7 +415,18 @@
   function start() {
     startLoFi();
     if (window.Hls && Hls.isSupported()) {
-      hls = new Hls({ enableWorker: true });
+      // Picture-quality tuning: default ABR opens at 512x288 and climbs
+      // slowly, which reads as persistent pixelation. Ladder is 0..6
+      // (288p..1080p60), so open at 720p, assume broadband until measured,
+      // climb back up fast after dips, and never auto-drop below 960x540.
+      hls = new Hls({
+        enableWorker: true,
+        startLevel: 4,
+        abrEwmaDefaultEstimate: 5000000,
+        abrBandWidthFactor: 0.9,
+        abrBandWidthUpFactor: 0.8,
+        minAutoLevel: 2,
+      });
       hls.subtitleDisplay = false;
       hls.subtitleTrack = -1;
       hls.on(Hls.Events.ERROR, (_, data) => {
