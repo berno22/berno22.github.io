@@ -133,11 +133,12 @@
   }
 
   // Unified volume model: both streams always play simultaneously; state
-  // only sets levels. LoFi's silent bed is a hard element mute (iOS ignores
-  // element .volume value writes, but always honors .muted). CNBC's "low"
-  // keeps the above-mute floor as requested.
+  // only sets levels. Neither bed is ever truly muted: CNBC's "low" and
+  // LoFi's "low" both keep an above-mute floor (inaudible) so both streams
+  // stay live and instantly switchable.
   const CNBC_LOW = 0.0000001; // 0.00001%: floor above true mute, inaudible
   function cnbcLow() { return CNBC_LOW; }
+  const LOFI_LOW = 0.000001; // floor above true mute when not prominent, like CNBC
   let savedSlider = null; // user's volume slider, restored after a break
 
   function applyAudioLevels() {
@@ -153,17 +154,19 @@
       savedSlider = null;
     }
 
-    // LoFi target: prominent only during a lofi break.
+    // LoFi target: prominent only during a lofi break; otherwise the
+    // above-mute floor (never 0, never muted) so it's instantly ready.
     const lofiLevel = isRealSafari ? 0.4 : 0.7;
     const lofiProminent = !!(adBreak && breakMode === 'lofi');
-    const lofiTarget = lofiProminent ? lofiLevel : 0;
+    const lofiTarget = lofiProminent ? lofiLevel : LOFI_LOW;
 
     // Fade toward the targets (skips re-fading when targets are unchanged, since
     // applyAudioLevels runs continuously on the break-poll interval).
     if (soundOn) fadeValue(video, 'cnbc', cnbcTarget, FADE_MS);
     fadeValue(lofiEl, 'lofi', lofiTarget, FADE_MS);
-    if (lofiTarget > 0 && lofiEl.muted) lofiEl.muted = false;
-    if (lofiTarget === 0 && !lofiEl.muted && lofiEl.volume === 0) lofiEl.muted = true;
+    // LoFi bed is never muted, only floored: unmuting keeps the continuous
+    // stream alive so it can't get stuck silent at a break start.
+    if (lofiEl.muted) lofiEl.muted = false;
 
     if (cnbcGain) cnbcGain.gain.value = 1.0;
     // LoFi never pauses: always streaming so it's instantly ready.
@@ -294,11 +297,30 @@
     try { lofiEl.src = LOFI[lofiIndex]; lofiEl.play().catch(() => {}); } catch (e) {}
   });
 
-  // Load LoFi at page start (muted until first gesture) and keep it playing
-  // at the inaudible floor under CNBC so it's instantly ready when a break hits.
+  // Stall recovery: 'error' only fires on hard failure. If the continuous
+  // bed stalls (no data, no error) it would otherwise sit silent into a
+  // break ("stuck"). Rebuffer the same station after a short grace period;
+  // hard failures still cycle via the 'error' handler above.
+  let lofiStallTimer = null;
+  lofiEl.addEventListener('stalled', () => {
+    if (lofiStallTimer) return;
+    lofiStallTimer = setTimeout(() => {
+      lofiStallTimer = null;
+      try {
+        if (lofiEl.paused) lofiEl.play().catch(() => {});
+        else { lofiEl.load(); lofiEl.play().catch(() => {}); }
+      } catch (e) {}
+    }, 4000);
+  });
+  lofiEl.addEventListener('playing', () => {
+    if (lofiStallTimer) { clearTimeout(lofiStallTimer); lofiStallTimer = null; }
+  });
+
+  // Load LoFi at page start and keep it playing at the above-mute floor
+  // under CNBC so it's instantly ready when a break hits. Never muted.
   function startLoFi() {
-    lofiEl.muted = true;
-    lofiEl.volume = 1.0; // muted pre-gesture; applyAudioLevels fades from here
+    if (lofiEl.muted) lofiEl.muted = false;
+    lofiEl.volume = LOFI_LOW; // start at the floor; applyAudioLevels fades from here
     if (!lofiEl.src) lofiEl.src = LOFI[lofiIndex];
     applyAudioLevels();
     lofiEl.play().catch(() => {});
