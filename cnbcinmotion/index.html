@@ -7,13 +7,13 @@
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.7.1/dist/hls.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
 <style>
-  body { margin: 0; background: #000; color: #eee; font: 14px system-ui; }
+  body { margin: 0; background: #e8e8e8; color: #1a1a1a; font: 14px system-ui; }
   #wrap { position: fixed; inset: 0; }
-  video { width: 100%; height: 100%; background: #000;
+  video { width: 100%; height: 100%; background: #e8e8e8;
           /* rendered but fully hidden behind the canvas below; the video element
              itself freezes when Tesla is in Drive, the canvas does not. */ }
   #frame, video { position: absolute; inset: 0; }
-  #frame { width: 100%; height: 100%; background: #000; z-index: 1; }
+  #frame { width: 100%; height: 100%; background: #e8e8e8; z-index: 1; }
   #overlay {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     background: rgba(0,0,0,0.55); color: #fff; font: 20px system-ui; cursor: pointer; z-index: 10;
@@ -139,7 +139,7 @@
     if (pan && video.videoWidth > 0 && !WC.active) {
       try {
         const cw = pan.width, ch = pan.height;
-        panCtx.fillStyle = '#000';
+        panCtx.fillStyle = '#e8e8e8';
         panCtx.fillRect(0, 0, cw, ch);
         const ratio = Math.min(cw / video.videoWidth, ch / video.videoHeight);
         const w = video.videoWidth * ratio, h = video.videoHeight * ratio;
@@ -894,7 +894,7 @@
       try {
         const ratio = Math.min(pan.width / frame.displayWidth, pan.height / frame.displayHeight);
         const w = frame.displayWidth * ratio, h = frame.displayHeight * ratio;
-        panCtx.fillStyle = '#000';
+        panCtx.fillStyle = '#e8e8e8';
         panCtx.fillRect(0, 0, pan.width, pan.height);
         panCtx.drawImage(frame, (pan.width - w) / 2, (pan.height - h) / 2, w, h);
         WC.lastPaint = performance.now();
@@ -945,6 +945,7 @@
     WC.mbox = MP4Box.createFile();
     WC._startT = performance.now();
     WC._lastOutT = 0;
+    WC._lastFlushT = performance.now(); // first periodic flush 30s after start, not at once
     wcPollPlaylist();
     wcPollTimer = setInterval(wcPollPlaylist, WC_POLL);
     wcTick();
@@ -952,10 +953,7 @@
 
   // Stall watchdog (the anti-clobber insurance): if the decoder emits
   // nothing for 8s while content waits, drain it gently with flush() and
-  // resume at the next keyframe. This fires only on a genuine wedge -
-  // unlike a blind periodic flush, a healthy pipeline never glitches.
-  // (A blind flush every 30s would freeze the picture each time: post-flush
-  // the decoder requires a key, so we'd sit out up to a GOP waiting.)
+  // resume at the next keyframe.
   function wcWatchdog() {
     if (!WC.active || !WC.dec || WC.dec.state !== 'configured' || !WC.pend.length) return;
     const sinceOut = performance.now() - (WC._lastOutT || WC._startT || performance.now());
@@ -969,10 +967,33 @@
     wcNote('watchdog flush: no output for ' + Math.round(sinceOut / 1000) + 's');
   }
 
+  // Periodic pipeline flush (every 30s): drain the decoder via flush()
+  // and resume at the next keyframe. This bounds any slow accumulation of
+  // wedge state (stale queue entries, prediction drift) before it can turn
+  // into decode errors. At 1fps the key-wait gap is invisible: the mailbox
+  // is deliberately NOT cleared, so the canvas simply holds its last paint
+  // for an extra beat instead of flashing or freezing long.
+  const WC_FLUSH_MS = 30000;
+  function wcFlushCycle() {
+    if (!WC.dec || WC.dec.state !== 'configured') return;
+    try {
+      const p = WC.dec.flush();
+      if (p && p.catch) p.catch(() => {});
+    } catch (e) {}
+    WC.needKey = true;
+    WC._lastOutT = performance.now();
+    WC._lastFlushT = performance.now();
+    WC._flushN = (WC._flushN || 0) + 1;
+    wcNote('periodic flush');
+  }
+
   // rAF loop: feed-while-hungry, paint-while-due, watch for stalls.
   function wcTick() {
     WC.ticks = (WC.ticks || 0) + 1;
-    if (WC.active) { wcPace(); wcDraw(); wcWatchdog(); }
+    if (WC.active) {
+      wcPace(); wcDraw(); wcWatchdog();
+      if (performance.now() - (WC._lastFlushT || 0) >= WC_FLUSH_MS) wcFlushCycle();
+    }
     wcDrawTimer = requestAnimationFrame(wcTick);
   }
 
