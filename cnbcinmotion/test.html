@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CNBC InMotion</title>
+<title>CNBC InMotion · TEST</title>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.7.1/dist/hls.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
 <style>
@@ -166,10 +166,17 @@
   // <video> picture freezes, so native=1 is expected to show a frozen
   // frame with audio still running - if THAT is smooth, the WebCodecs
   // path only needs to exist for picture, not for playback.
-  // Live retune hook (no redeploy): __setFPS(n) -> paint ceiling, 0 = uncapped.
+  const Q = new URLSearchParams(location.search);
+  const TEST = {
+    native: Q.get('native') === '1' || Q.get('wc') === '0',
+    fps: Q.has('fps') ? +Q.get('fps') : null,
+    flushSec: Q.has('flush') ? +Q.get('flush') : null,
+    level: Q.has('level') ? +Q.get('level') : null,
+    wdSec: Q.has('wd') ? +Q.get('wd') : null
+  };
   const DEFAULT_SRC = 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
   // ?src=<url-encoded m3u8> swaps the stream (any HLS master/media playlist).
-  const src = DEFAULT_SRC;
+  const src = Q.get('src') || DEFAULT_SRC;
 
   let hls = null;
   let soundOn = false;       // user tapped for sound
@@ -474,7 +481,7 @@
     box: [],           // decoded mailbox: [{f, w}] newest <=2; rest closed
     lastDrawn: null, lastDrawnTs: null, // {f, w, ts} wrapper + last shown ts
     framesDecoded: 0, framesDrawn: 0, samples: 0, dropped: 0,
-    fps: 0, lastPaint: 0, needKey: true, // 0 = uncapped paint (full framerate)
+    fps: (TEST.fps != null ? TEST.fps : 0), lastPaint: 0, needKey: true,
     segs: {}, segQueue: [], plSegs: [], feeding: false,
     status: '', err: ''
   };
@@ -495,13 +502,13 @@
   // Draw/feed LEAD: decode outputs arrive with a lead over the audio clock.
   // Nudging the reference clock forward by this much (default one frame)
   // lets the draw loop always find a frame, removing the hold/judder.
-  const WC_LEAD_MS = 34; // small paint lead, in ms
-  const WC_BOX = 16; // decoded frames held; deep enough to absorb jitter
-  const WC_MODE = 'seq'; // sequential display = smooth motion (proven)
-  const WC_FETCH_AHEAD = 1000; // ms ahead of the audio clock to fetch segments (keeps the feed queue stocked)
+  const WC_LEAD_MS = +(Q.get('lead') || 34);
+  const WC_BOX = +(Q.get('box') || 16); // decoded frames held; deep box = no starvation
+  const WC_MODE = (Q.get('mode') || 'seq'); // 'seq' = sequential (proven), 'clock' = clock-matched deep buffer
+  const WC_FETCH_AHEAD = +(Q.get('fahead') || 1000); // ms ahead of clock to FETCH segments (pend buffer)
   const WC_FRAME_MS = 1000 / 30; // source is 30fps; output walk step
   WC.frameDur = WC_FRAME_MS;
-  const WC_FEED_LEAD = 300; // ms ahead of the clock the decoder may run
+  const WC_FEED_LEAD = +(Q.get('flead') || 300); // ms ahead of clock the feed may run
   function wcRefPdt() { return wcAudioPdt() + WC_LEAD_MS; }
   function wcAudioPdt() {
     try {
@@ -512,9 +519,9 @@
     } catch (e) {}
     return Date.now();
   }
-  const WC_POLL = 300; // ms between playlist refreshes (segments are 4s; fast poll kills boundary hitch)
-  const WC_FLUSH_MS = 0; // periodic flush off: mp4box now releases samples, so nothing accumulates
-  const WC_WD_MS = 8000; // stall watchdog: flush if no decoder output for 8s
+  const WC_POLL = +(Q.get('poll') || 300); // ms between playlist refreshes (segments are 4s)
+  const WC_FLUSH_MS = (TEST.flushSec != null ? TEST.flushSec : 0) * 1000;
+  const WC_WD_MS = (TEST.wdSec != null ? TEST.wdSec : 8) * 1000;
 
   // Rebuild the avcDecoderConfigurationRecord (VideoDecoder description) from
   // the avcC box mp4box already parsed: version, profile/compat/level,
@@ -997,12 +1004,18 @@
     // motion (pixelation on movement is bitrate starvation, not resolution).
     const list = hls.levels;
     let best = -1, bestBw = -1;
-    for (let i = 0; i < list.length; i++) {
-      const l = list[i];
-      const h = l.height || 0;
-      const fr = l.frameRate || 0;
-      if (h >= 480 && h <= 720 && l.videoCodec && l.videoCodec.indexOf('avc') >= 0 &&
-          (fr <= 0 || fr <= 30) && (l.bitrate || 0) > bestBw) { bestBw = l.bitrate || 0; best = i; }
+    if (TEST.level != null && list[TEST.level]) {
+      best = TEST.level; // ?level=N
+    } else if (Q.get('lowres') === '1') {
+      best = 0; // ?lowres=1 -> 512x288, ~4x cheaper frames so a deep box is affordable
+    } else {
+      for (let i = 0; i < list.length; i++) {
+        const l = list[i];
+        const h = l.height || 0;
+        const fr = l.frameRate || 0;
+        if (h >= 480 && h <= 720 && l.videoCodec && l.videoCodec.indexOf('avc') >= 0 &&
+            (fr <= 0 || fr <= 30) && (l.bitrate || 0) > bestBw) { bestBw = l.bitrate || 0; best = i; }
+      }
     }
     if (best < 0) {
       for (let i = 0; i < list.length; i++) {
@@ -1127,7 +1140,9 @@
         } catch (e) {}
         tryAutoplay();
         // Start the Drive-proof frame pipeline once levels are known.
-        setTimeout(wcStart, 500);
+        // ?native=1 keeps it off so <video> alone can be judged in Drive.
+        if (!TEST.native) setTimeout(wcStart, 500);
+        else wcNote('TEST: native mode (no WebCodecs)');
       });
       hls.on(Hls.Events.LEVEL_LOADED, (_, data) => onLevel(data));
       hls.on(Hls.Events.LEVEL_UPDATED, (_, data) => onLevel(data));
