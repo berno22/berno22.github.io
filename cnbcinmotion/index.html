@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CNBC InMotion</title>
+<title>CNBC InMotion · TEST</title>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.7.1/dist/hls.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
 <style>
@@ -166,10 +166,17 @@
   // <video> picture freezes, so native=1 is expected to show a frozen
   // frame with audio still running - if THAT is smooth, the WebCodecs
   // path only needs to exist for picture, not for playback.
-  // Live retune hook (no redeploy): __setFPS(n) -> paint ceiling, 0 = uncapped.
+  const Q = new URLSearchParams(location.search);
+  const TEST = {
+    native: Q.get('native') === '1' || Q.get('wc') === '0',
+    fps: Q.has('fps') ? +Q.get('fps') : null,
+    flushSec: Q.has('flush') ? +Q.get('flush') : null,
+    level: Q.has('level') ? +Q.get('level') : null,
+    wdSec: Q.has('wd') ? +Q.get('wd') : null
+  };
   const DEFAULT_SRC = 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
   // ?src=<url-encoded m3u8> swaps the stream (any HLS master/media playlist).
-  const src = DEFAULT_SRC;
+  const src = Q.get('src') || DEFAULT_SRC;
 
   let hls = null;
   let soundOn = false;       // user tapped for sound
@@ -474,7 +481,7 @@
     box: [],           // decoded mailbox: [{f, w}] newest <=2; rest closed
     lastDrawn: null, lastDrawnTs: null, // {f, w, ts} wrapper + last shown ts
     framesDecoded: 0, framesDrawn: 0, samples: 0, dropped: 0,
-    fps: 0, lastPaint: 0, needKey: true, // 0 = uncapped paint (full framerate)
+    fps: (TEST.fps != null ? TEST.fps : 30), lastPaint: 0, needKey: true,
     segs: {}, segQueue: [], plSegs: [], feeding: false,
     status: '', err: ''
   };
@@ -495,13 +502,14 @@
   // Draw/feed LEAD: decode outputs arrive with a lead over the audio clock.
   // Nudging the reference clock forward by this much (default one frame)
   // lets the draw loop always find a frame, removing the hold/judder.
-  const WC_LEAD_MS = 34; // small paint lead, in ms
-  const WC_BOX = 16; // decoded frames held; deep enough to absorb jitter
-  const WC_MODE = 'seq'; // sequential display = smooth motion (proven)
-  const WC_FETCH_AHEAD = 1000; // ms ahead of the audio clock to fetch segments (keeps the feed queue stocked)
+  const WC_LEAD_MS = +(Q.get('lead') || 34);
+  const WC_BOX = +(Q.get('box') || 16); // decoded frames held (mailbox depth)
+  const WC_MODE = (Q.get('mode') || 'seq'); // 'seq' = sequential (proven), 'clock' = clock-matched deep buffer
+  const WC_FETCH_AHEAD = +(Q.get('fahead') || 1000); // ms ahead of clock to FETCH
   const WC_FRAME_MS = 1000 / 30; // source is 30fps; output walk step
+  const WC_CATCHUP_MS = 120; // skip frames >120ms behind the clock to re-sync
   WC.frameDur = WC_FRAME_MS;
-  const WC_FEED_LEAD = 300; // ms ahead of the clock the decoder may run
+  const WC_FEED_LEAD = +(Q.get('flead') || 300); // ms ahead of clock the feed may run
   function wcRefPdt() { return wcAudioPdt() + WC_LEAD_MS; }
   function wcAudioPdt() {
     try {
@@ -512,9 +520,9 @@
     } catch (e) {}
     return Date.now();
   }
-  const WC_POLL = 300; // ms between playlist refreshes (segments are 4s; fast poll kills boundary hitch)
-  const WC_FLUSH_MS = 0; // periodic flush off: mp4box now releases samples, so nothing accumulates
-  const WC_WD_MS = 8000; // stall watchdog: flush if no decoder output for 8s
+  const WC_POLL = +(Q.get('poll') || 300); // ms between playlist refreshes (segments are 4s)
+  const WC_FLUSH_MS = (TEST.flushSec != null ? TEST.flushSec : 0) * 1000;
+  const WC_WD_MS = (TEST.wdSec != null ? TEST.wdSec : 8) * 1000;
 
   // Rebuild the avcDecoderConfigurationRecord (VideoDecoder description) from
   // the avcC box mp4box already parsed: version, profile/compat/level,
@@ -604,6 +612,9 @@
     WC.box.push({ f: frame, w, ts: frame.timestamp });
     // Keep the box time-sorted (cheap; usually already in order).
     WC.box.sort((a, b) => a.w - b.w);
+    // Arm sequential pacing from the mailbox head: the first frame due at its
+    // own timestamp, and it self-advances as the clock catches up. Arming on
+    // arrival (not on paint) means pacing is live from frame #1.
     while (WC.box.length > WC_BOX) {
       const o = WC.box.shift();
       WC._hcap = (WC._hcap || 0) + 1;
@@ -682,24 +693,20 @@
     if (WC.pend.length > 60) {
       let p = 0;
       while (p < WC.pend.length - 60 && WC.pend[p].wpdt < now - 1000) p++;
-      // Walk back to the most recent keyframe: the backlog head must always
-      // be a key, or the decoder hits delta-without-key errors and rebuilds
-      // in a churn loop. A stale head key costs one wasted GOP at most.
       if (p > 0) {
-        let j = p;
-        while (j > 0 && !WC.pend[j].sync) j--;
-        p = j;
+        let j = p; while (j > 0 && !WC.pend[j].sync) j--; p = j;
       }
       if (p) { WC.dropped += p; WC._dr.past += p; WC.pend.splice(0, p); }
     }
     if (!WC.pend.length) return;
     let fed = 0;
+    const boxTarget = WC_BOX;
     // Feed by CLOCK so decode never races ahead of the 30fps timeline. Racing
     // (decoding free) fills the mailbox with future frames and starves paint -
     // measured 1.6fps. Clock-gated feed measured a steady 7fps with even
     // ~100ms paint cadence. Lead of 800ms keeps the decoder busy without
     // letting it get ahead of paint.
-    while (WC.pend.length && WC.dec.decodeQueueSize < 12 && WC.box.length < WC_BOX && fed < 16) {
+    while (WC.pend.length && WC.dec.decodeQueueSize < 12 && WC.box.length < boxTarget && fed < 16) {
       const c = WC.pend[0];
       if (c.wpdt > now + WC_FEED_LEAD) { break; } // clock-gate keeps the buffer at the clock
       if (WC.feedW == null) WC.feedW = c.wpdt; // fallback walk seed
@@ -766,8 +773,8 @@
   }
 
   function wcPollPlaylist() {
-    if (!hls || !hls.levels || !hls.levels.length || !(WC.level != null)) return;
-    fetch(hls.levels[WC.level].url).then(r => r.text()).then(txt => {
+    if (!WC.videoPlUrl) return;
+    fetch(WC.videoPlUrl).then(r => r.text()).then(txt => {
       const pl = wcParsePlaylist(txt);
       WC.plSegs = pl.segs;
       const initUrl = pl.init;
@@ -804,11 +811,6 @@
       const oldest = (WC.plSegs[0] && WC.plSegs[0].pdt) || 0;
       if (isFinite(apdt) && oldest && apdt > oldest + 4000) aim = Math.min(apdt, live);
     } catch (e) {}
-    WC._dbgAim = aim;
-    WC._dbgNpl = WC.plSegs.length;
-    WC._dbgFirst = (WC.plSegs[0] && WC.plSegs[0].pdt) || 0;
-    WC._dbgLast = (WC.plSegs[WC.plSegs.length - 1] && WC.plSegs[WC.plSegs.length - 1].pdt) || 0;
-    WC._dbgMatched = 0;
     const minPdt = aim - 3000;
     let anyPdt = false;
     for (const s of WC.plSegs) {
@@ -819,9 +821,8 @@
       // backlog head near now; the tail trim below absorbs the rest.
       if (s.pdt < minPdt || s.pdt > aim + WC_FETCH_AHEAD) continue;
       if (WC.segs[s.url]) continue;
-      if (WC.segQueue.length >= 8) break; // bounded: retry on next poll
+      if (WC.segQueue.length >= 6) break; // bounded: retry on next poll
       WC.segs[s.url] = true;
-      WC._dbgMatched++;
       wcFetchSeg(s.url, s.pdt);
     }
     // Fallback if the stream carries no program date/times: just the newest.
@@ -905,84 +906,180 @@
   // small box throttles decode to the same trickle via backpressure.
   // WC._syncMs tracks |painted - audio| for the soak harness: that number
   // IS the lip-sync error, measured live.
-  function wcPaint(frame) {
-    if (!pan || pan.width <= 0 || !frame || frame.displayWidth <= 0) return false;
+  // ===== Renderers: four ways to get a decoded frame onto the screen =====
+  // The decode pipeline is identical for all of them; only PRESENTATION
+  // differs. Pick with ?render= :
+  //   paint  (default) Canvas2D drawImage  - baseline; simplest, most variable
+  //   gl               WebGL2 texture upload - GPU->GPU copy, vsync-locked
+  //   bmp              ImageBitmap + bitmaprenderer - zero-copy present
+  //   stream           MediaStreamTrackGenerator -> <video> - hand presentation
+  //                    back to the browser compositor (wild card: may bypass
+  //                    whatever Tesla blocks, and is natively smooth)
+  const R = { mode: 'paint', ready: false, note: '' };
+
+  function wcInitRenderer() {
+    R.mode = (Q.get('render') || 'gl').toLowerCase(); // gl = GPU upload, most consistent
     try {
-      const ratio = Math.min(pan.width / frame.displayWidth, pan.height / frame.displayHeight);
-      const w = frame.displayWidth * ratio, h = frame.displayHeight * ratio;
+      if (R.mode === 'gl') {
+        const gl = pan.getContext('webgl2', { alpha: false, antialias: false, desynchronized: true, preserveDrawingBuffer: false });
+        if (!gl) { R.mode = 'paint'; R.note = 'no webgl2'; return; }
+        R.gl = gl;
+        const vs = '#version 300 es\ninlayout(location=0) in vec2 p; out vec2 uv; void main(){ gl_Position=vec4(p,0.,1.); uv=p*0.5+0.5;}';
+        const fs = '#version 300 es\nprecision mediump float; in vec2 uv; uniform vec4 r; uniform sampler2D t; out vec4 o; void main(){ o=texture(t, mix(r.xy, r.zw, uv));}';
+        const mk = (ty, src) => { const sh = gl.createShader(ty); gl.shaderSource(sh, src); gl.compileShader(sh); if(!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh)); return sh; };
+        const pr = gl.createProgram();
+        gl.attachShader(pr, mk(gl.VERTEX_SHADER, vs));
+        gl.attachShader(pr, mk(gl.FRAGMENT_SHADER, fs));
+        gl.linkProgram(pr);
+        if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+        gl.useProgram(pr);
+        const buf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+        const loc = gl.getAttribLocation(pr, 'p');
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+        R.tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, R.tex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        R.uvLoc = gl.getUniformLocation(pr, 'r');
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+        R.ready = true;
+      } else if (R.mode === 'bmp') {
+        // pan already has a 2d context, so swap in a fresh canvas element.
+        var nc = document.createElement('canvas');
+        nc.id = 'frame2';
+        nc.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:1;background:#e8e8e8;';
+        pan.parentNode.insertBefore(nc, pan.nextSibling);
+        pan.style.display = 'none';
+        R.bmpCanvas = nc;
+        R.bmp = nc.getContext('bitmaprenderer');
+        if (!R.bmp) { R.mode = 'paint'; R.note = 'no bitmaprenderer'; return; }
+        R.ready = true;
+      } else if (R.mode === 'stream') {
+        // A real <video> fed by a MediaStreamTrackGenerator. The browser's
+        // compositor does presentation (vsync, no canvas work at all). If
+        // Tesla's Drive block only touches network-fed <video>, this sails
+        // through; if it blocks every video surface, we fall back to gl/paint.
+        const TrackGen = window.MediaStreamTrackGenerator || window.VideoTrackGenerator;
+        if (!TrackGen) { R.mode = 'gl'; wcInitRenderer(); R.note = 'no MediaStreamTrackGenerator -> gl'; return; }
+        R.gen = new TrackGen({ kind: 'video' });
+        R.writer = R.gen.writable.getWriter();
+        R.streamVideo = document.createElement('video');
+        R.streamVideo.muted = true;
+        R.streamVideo.playsInline = true;
+        R.streamVideo.autoplay = true;
+        R.streamVideo.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:1;background:#e8e8e8;object-fit:contain;';
+        pan.parentNode.insertBefore(R.streamVideo, pan);
+        pan.style.display = 'none';
+        R.stream = new MediaStream([R.gen]);
+        R.streamVideo.srcObject = R.stream;
+        R.streamVideo.play().catch(function () {});
+        R.pending = 0;
+        R.ready = true;
+      } else {
+        R.ready = true; // paint
+      }
+    } catch (e) { R.mode = 'paint'; R.note = 'renderer init failed: ' + e.message; R.ready = true; }
+    wcNote('renderer=' + R.mode + (R.note ? ' (' + R.note + ')' : ''));
+  }
+
+  // Letterbox a video frame into the canvas rect; returns nothing (draws).
+  function wcPaint(frame) {
+    if (!frame || !frame.displayWidth) return false;
+    if (R.mode === 'stream') {
+      // Backpressure: never let writes pile up. Writing is async; we allow a
+      // small in-flight window and drop the frame if the writer is behind.
+      if (R.pending > 2) return false;
+      R.pending++;
+      var p = R.writer.write(frame).then(function () { R.pending--; }, function () { R.pending--; });
+      return true;
+    }
+    if (!pan || pan.width <= 0) return false;
+    if (R.mode === 'gl') return wcPaintGL(frame);
+    if (R.mode === 'bmp') {
+      // createImageBitmap is async; the frame must stay alive until it
+      // resolves, so we clone a handle and close the original immediately.
+      var f = frame;
+      createImageBitmap(f).then(function (bmp) {
+        try { f.close(); } catch (e) {}
+        if (R.bmpCanvas && R.bmpCanvas.width > 0) { R.bmp.transferFromImageBitmap(bmp); WC.framesDrawn++; WC._h.painted++; }
+      }, function () { try { f.close(); } catch (e) {} });
+      return true;
+    }
+    try {
+      var ratio = Math.min(pan.width / frame.displayWidth, pan.height / frame.displayHeight);
+      var w = frame.displayWidth * ratio, h = frame.displayHeight * ratio;
       panCtx.fillStyle = '#e8e8e8';
       panCtx.fillRect(0, 0, pan.width, pan.height);
       panCtx.drawImage(frame, (pan.width - w) / 2, (pan.height - h) / 2, w, h);
       return true;
     } catch (e) { return false; }
   }
+
+  // WebGL2: upload the frame as a texture and draw a fullscreen quad with
+  // aspect-corrected UVs. GPU->GPU, so no readback and no 2D-canvas variance.
+  function wcPaintGL(frame) {
+    var gl = R.gl;
+    if (!gl) return false;
+    try {
+      var cw = pan.width, ch = pan.height;
+      if (cw <= 0 || ch <= 0) return false;
+      gl.viewport(0, 0, cw, ch);
+      gl.bindTexture(gl.TEXTURE_2D, R.tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame);
+      // Letterbox by cropping UVs (fullscreen quad, cropped sampling).
+      var fa = frame.displayWidth / frame.displayHeight, ca = cw / ch;
+      var u0 = 0, v0 = 0, u1 = 1, v1 = 1;
+      if (fa > ca) { var w = ca / fa; u0 = (1 - w) / 2; u1 = 1 - u0; }
+      else { var hh = fa / ca; v0 = (1 - hh) / 2; v1 = 1 - v0; }
+      gl.uniform4f(R.uvLoc, u0, v0, u1, v1);
+      gl.clearColor(0.91, 0.91, 0.91, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      return true;
+    } catch (e) { return false; }
+  }
   function wcDraw() {
     if (!WC.active) return;
     if (!WC._h) WC._h = { thr: 0, hold: 0, same: 0, painted: 0, pruned: 0, att: 0, noguard: 0, threw: 0 };
+    // Paint at most WC.fps times per second. This rAF loop runs at the display
+    // rate (60Hz+); without this gate it drains the mailbox at 60/s while the
+    // 30fps source only refills at 30/s -> box empties -> sawtooth judder.
     if (WC.fps > 0 && performance.now() - WC.lastPaint < 1000 / WC.fps) { WC._h.thr++; return; }
-    const now = wcRefPdt();
-    // Drop frames older than 1.5s (genuinely dead) and any already shown.
-    // Keep the window generous: a slightly-late frame is still the right
-    // thing to show; pruning it just starves the paint loop.
-    for (let i = WC.box.length - 1; i >= 0; i--) {
-      const o = WC.box[i];
-      if (o.w < now - 2000) {
-        WC._h.pruned++;
-        try { o.f.close(); } catch (e) {}
-        WC.box.splice(i, 1);
-      }
-    }
-    // Pick the newest frame at/behind the clock (correct A/V), else the
-    // single nearest frame (ahead). Drain one per rAF so the mailbox stays
-    // stocked; never hold when a frame exists - holding is what starves the
-    // next tick and produces the on/off judder.
-    // SEQUENTIAL display: paint the front (oldest) frame of the time-sorted
-    // box, one per display interval. This is how smooth video works - frames
-    // are shown in presentation order at the frame rate, never picked by
-    // array index against the clock (that caused out-of-sequence judder).
-    // The clock only seeds the start and corrects drift gently via resync.
     if (!WC.box.length) { WC._h.hold++; return; }
-    let best;
-    if (WC_MODE === 'seq') {
-      best = WC.box.shift(); // sequential from front
-    } else {
-      // CLOCK-MATCHED: pick the newest frame at/behind the clock, else the
-      // nearest ahead. The (time-sorted) deep buffer guarantees one is close
-      // to the clock every tick -> no starvation AND low sync. Frames older
-      // than the chosen one are dropped (they're behind the clock).
-      let bi = -1;
-      for (let i = 0; i < WC.box.length; i++) {
-        if (WC.box[i].w <= now + 16) bi = i;
-      }
-      if (bi < 0) {
-        let bd = Infinity;
-        for (let i = 0; i < WC.box.length; i++) {
-          const d = WC.box[i].w - now;
-          if (d < bd) { bd = d; bi = i; }
-        }
-      }
-      for (let i = 0; i < bi; i++) { try { WC.box[i].f.close(); } catch (e) {} WC._h.pruned++; }
-      if (bi > 0) WC.box.splice(0, bi);
-      best = WC.box.shift();
+    const now = wcRefPdt();
+    // FIFO in presentation order, one per tick. Catch-up drop: skip frames
+    // more than WC_CATCHUP_MS behind the clock so lag can never accumulate.
+    let bi = 0;
+    while (bi < WC.box.length && WC.box[bi].w < now - WC_CATCHUP_MS) {
+      try { WC.box[bi].f.close(); } catch (e) {}
+      WC._h.pruned++; bi++;
     }
+    if (bi > 0) WC.box.splice(0, bi);
+    if (!WC.box.length) { WC._h.hold++; return; }
+    const best = WC.box.shift();
     if (WC.lastDrawn) { try { WC.lastDrawn.f.close(); } catch (e) {} }
     WC.lastDrawn = best;
-    WC.lastDrawnTs = best.ts;
     WC._h.att++;
     WC._syncMs = Math.abs(best.w - now);
+    WC.lastPaint = performance.now(); // stamp at tick start (start-to-start cadence)
     if (wcPaint(best.f)) {
-      WC.lastPaint = performance.now();
       WC.framesDrawn++;
       WC._h.painted++;
     } else {
       WC._h.threw++;
       try { best.f.close(); } catch (_) {}
       WC.lastDrawn = null;
-    WC.lastDrawnTs = null;
     }
   }
 
   function wcStart() {
+    wcInitRenderer();
     if (!window.MP4Box) { wcNote('MP4Box missing'); setError('WC: MP4Box.js failed to load'); return; }
     if (!window.VideoDecoder || !window.EncodedVideoChunk) {
       const missing = ['VideoDecoder', 'EncodedVideoChunk'].filter(k => !(k in window)).join(',');
@@ -990,36 +1087,50 @@
       setError('no WebCodecs VideoDecoder [' + (missing || 'unknown') + '] - Drive sim will go black');
       return;
     }
-    if (!hls || !hls.levels || !hls.levels.length) { wcNote('no hls levels'); setError('WC: no hls levels yet'); return; }
-    // Decode 720p at 30fps (not 60): identical pixels and sharpness, half
-    // the feed/demux/drop churn - at ~1fps display the extra 30fps is pure
-    // waste. Highest bitrate among the <=30fps 720p AVC rungs for clean
-    // motion (pixelation on movement is bitrate starvation, not resolution).
-    const list = hls.levels;
-    let best = -1, bestBw = -1;
-    for (let i = 0; i < list.length; i++) {
-      const l = list[i];
-      const h = l.height || 0;
-      const fr = l.frameRate || 0;
-      if (h >= 480 && h <= 720 && l.videoCodec && l.videoCodec.indexOf('avc') >= 0 &&
-          (fr <= 0 || fr <= 30) && (l.bitrate || 0) > bestBw) { bestBw = l.bitrate || 0; best = i; }
-    }
-    if (best < 0) {
-      for (let i = 0; i < list.length; i++) {
-        const l = list[i];
-        const h = l.height || 0;
-        if (h >= 480 && h <= 720 && l.videoCodec && l.videoCodec.indexOf('avc') >= 0) {
-          if ((l.bitrate || 0) > bestBw) { bestBw = l.bitrate || 0; best = i; }
+    // Resolve the VIDEO variant playlist ourselves (the element may be playing
+    // an audio-only rendition, so hls.levels is not a video source).
+    wcResolveVideoVariant().then(function () { wcStartLevels(); });
+  }
+  // Pick a video rendition URL from the master: highest-bitrate 720p<=30fps
+  // AVC by default; ?level=N / ?lowres=1 override.
+  function wcResolveVideoVariant() {
+    return fetch(DEFAULT_SRC).then(function (r) { return r.text(); }).then(function (txt) {
+      var lines = txt.split(/\r?\n/).map(function (l) { return l.trim(); });
+      var v = [];
+      for (var i = 0; i < lines.length; i++) {
+        if (lines[i].indexOf('#EXT-X-STREAM-INF:') === 0) {
+          var inf = lines[i], url = lines[i + 1] || '';
+          if (!/avc1/.test(inf)) continue;
+          var res = /RESOLUTION=(\d+)x(\d+)/.exec(inf);
+          var bw = /BANDWIDTH=(\d+)/.exec(inf);
+          var fr = /FRAME-RATE=([\d.]+)/.exec(inf);
+          v.push({ url: new URL(url, DEFAULT_SRC).href, w: res ? +res[1] : 0, h: res ? +res[2] : 0,
+                   bw: bw ? +bw[1] : 0, fr: fr ? +fr[1] : 30 });
         }
       }
-    }
-    if (best < 0) best = 0;
-    WC.level = best;
-    wcNote('start, level=' + best + ' ' + (list[best].width || '?') + 'x' + (list[best].height || '?') + ' ' + (list[best].videoCodec || ''));
+      if (!v.length) { setError('WC: no video variant found'); return; }
+      var pick;
+      if (TEST.level != null) { pick = v[TEST.level]; }
+      else if (Q.get('lowres') === '1') { pick = v[0]; }
+      else {
+        var bwBest = -1;
+        for (var k = 0; k < v.length; k++) {
+          var l = v[k];
+          if (l.h >= 480 && l.h <= 720 && l.fr <= 30.5 && l.bw > bwBest) { bwBest = l.bw; pick = l; }
+        }
+        if (!pick) { bwBest = -1; for (var k2 = 0; k2 < v.length; k2++) { if (v[k2].bw > bwBest) { bwBest = v[k2].bw; pick = v[k2]; } } }
+      }
+      WC.videoPlUrl = pick.url;
+      wcNote('video variant ' + pick.w + 'x' + pick.h + ' @' + pick.bw);
+    }).catch(function (e) { setError('WC: master fetch ' + e.message); });
+  }
+  function wcStartLevels() {
+    // The variant is already resolved (WC.videoPlUrl). Just start the loop.
+    wcNote('pipeline start');
     WC.mbox = MP4Box.createFile();
     WC._startT = performance.now();
     WC._lastOutT = 0;
-    WC._lastFlushT = performance.now(); // first periodic flush 30s after start, not at once
+    WC._lastFlushT = performance.now();
     wcPollPlaylist();
     wcPollTimer = setInterval(wcPollPlaylist, WC_POLL);
     wcTick();
@@ -1086,7 +1197,22 @@
   let wcPollTimer = null, wcDrawTimer = null;
 
 
-  function start() {
+  // Resolve the master playlist's audio-only rendition URI (absolute).
+  async function wcAudioOnlyUrl(masterUrl) {
+    try {
+      const txt = await (await fetch(masterUrl)).text();
+      for (const raw of txt.split(/\r?\n/)) {
+        const line = raw.trim();
+        if (line.indexOf('#EXT-X-MEDIA:') === 0 && /TYPE=AUDIO/.test(line)) {
+          const m = /URI="([^"]+)"/.exec(line);
+          if (m) { const u = new URL(m[1], masterUrl).href; wcNote('audio-only: ' + u.slice(-24)); return u; }
+        }
+      }
+    } catch (e) { wcNote('audio-only resolve failed: ' + e.message); }
+    return masterUrl;
+  }
+
+  async function start() {
     startLoFi();
     if (window.Hls && Hls.isSupported()) {
       // Small MSE footprint for the car: ~12s forward buffer, 25MB cap,
@@ -1127,12 +1253,17 @@
         } catch (e) {}
         tryAutoplay();
         // Start the Drive-proof frame pipeline once levels are known.
-        setTimeout(wcStart, 500);
+        // ?native=1 keeps it off so <video> alone can be judged in Drive.
+        if (!TEST.native) setTimeout(wcStart, 500);
+        else wcNote('TEST: native mode (no WebCodecs)');
       });
       hls.on(Hls.Events.LEVEL_LOADED, (_, data) => onLevel(data));
       hls.on(Hls.Events.LEVEL_UPDATED, (_, data) => onLevel(data));
       hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, disableSubtitles);
-      hls.loadSource(src);
+      // ?audioonly=1 -> swap the master for its audio-only rendition, so the
+      // element is an audio player (no video decode for Tesla to block).
+      const bootSrc = Q.get('audioonly') === '1' ? (await wcAudioOnlyUrl(src)) : src;
+      hls.loadSource(bootSrc);
       hls.attachMedia(video);
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = src;
@@ -1161,6 +1292,7 @@
   function sizePan() {
     const cw = window.innerWidth, ch = window.innerHeight;
     if (pan) { pan.width = cw; pan.height = ch; }
+    if (R.bmpCanvas) { R.bmpCanvas.width = cw; R.bmpCanvas.height = ch; }
   }
   window.addEventListener('resize', sizePan);
   sizePan();
