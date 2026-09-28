@@ -161,15 +161,13 @@
     }
     panRAF = requestAnimationFrame(pumpFrames);
   }
-  // LoFi bed stations. The FastCast4u "lofi hip hop" AutoDJ channels lead the
-  // list (mp=/1 is the default bed; /2 and /3 are the alternates the # button
-  // cycles through), with the loficafe/laut streams kept as further fallbacks.
+  // LoFi bed stations. The FastCast4u "lofi hip hop" AutoDJ channel leads the
+  // list as the default bed, with the loficafe/laut streams behind it as the
+  // alternates the # button cycles through.
   // HTTPS is required, not http: this page is served over HTTPS, so an http://
   // source is blocked as mixed content. usa9 serves HTTPS over GET (it answers
   // HEAD with a bogus HTTP/0.9, which is harmless for <audio src>).
   const LOFI = ['https://usa9.fastcast4u.com/proxy/jamz?mp=/1',
-                'https://usa9.fastcast4u.com/proxy/jamz?mp=/2',
-                'https://usa9.fastcast4u.com/proxy/jamz?mp=/3',
                 'https://radio.loficafe.net/listen/chilling/radio.mp3',
                 'https://radio.loficafe.net/listen/sleeping/radio.mp3',
                 'https://radio.loficafe.net/listen/working/radio.mp3',
