@@ -74,6 +74,16 @@
     background: #fff; color: #111; font-weight: 700;
     box-shadow: 0 2px 10px rgba(0,0,0,0.35);
   }
+  /* LoFi station switcher: a small # tucked beside the LoFi toggle */
+  .segrow { display: flex; align-items: center; gap: 1px; }
+  #lofinx {
+    appearance: none; border: none; background: transparent; cursor: pointer;
+    color: #8b8d92; font: 700 15px/1 system-ui; padding: 6px 8px; border-radius: 999px;
+    -webkit-tap-highlight-color: transparent;
+    transition: background .18s ease, color .18s ease, transform .12s ease;
+  }
+  #lofinx:hover { color: #fff; background: rgba(255,255,255,0.10); }
+  #lofinx:active { transform: scale(0.88); }
   #adcount {
     color: #e6e6e7; font: 600 11px/1 ui-monospace, Menlo, monospace; letter-spacing: 1px;
     padding: 4px 10px; border-radius: 999px; margin-top: 2px;
@@ -89,7 +99,10 @@
   <button id="gotolive" class="hidden">Go LIVE</button>
   <div id="err"></div>
   <div id="adctl">
-    <button class="seg" type="button" data-mode="lofi">LoFi</button>
+    <div class="segrow">
+      <button class="seg" type="button" data-mode="lofi">LoFi</button>
+      <button id="lofinx" type="button" title="Next LoFi station" aria-label="Next LoFi station">#</button>
+    </div>
     <button class="seg" type="button" data-mode="mute">Mute</button>
     <button class="seg" type="button" data-mode="ads">Ads</button>
     <div id="adcount">--</div>
@@ -148,16 +161,31 @@
     }
     panRAF = requestAnimationFrame(pumpFrames);
   }
-  const LOFI = ['https://radio.loficafe.net/listen/chilling/radio.mp3',
+  // LoFi bed stations. The FastCast4u "lofi hip hop" AutoDJ channels lead the
+  // list (mp=/1 is the default bed; /2 and /3 are the alternates the # button
+  // cycles through), with the loficafe/laut streams kept as further fallbacks.
+  // HTTPS is required, not http: this page is served over HTTPS, so an http://
+  // source is blocked as mixed content. usa9 serves HTTPS over GET (it answers
+  // HEAD with a bogus HTTP/0.9, which is harmless for <audio src>).
+  const LOFI = ['https://usa9.fastcast4u.com/proxy/jamz?mp=/1',
+                'https://usa9.fastcast4u.com/proxy/jamz?mp=/2',
+                'https://usa9.fastcast4u.com/proxy/jamz?mp=/3',
+                'https://radio.loficafe.net/listen/chilling/radio.mp3',
                 'https://radio.loficafe.net/listen/sleeping/radio.mp3',
                 'https://radio.loficafe.net/listen/working/radio.mp3',
                 'https://laut.fm/lofi'];
-  // TEST COPY ONLY (test.html). Same pipeline as index.html, with knobs
-  // exposed on the URL so behaviour can be A/B'd in the car without edits:
+  // URL knobs, kept live on the deployed page so behaviour can be A/B'd in the
+  // car without a redeploy:
+  //   ?audioonly=1 - element takes the master's audio rendition only, so it
+  //                  carries NO video track (nothing for Drive to freeze)
+  //                  while the canvas pipeline decodes video independently
+  //   ?render=     - gl (default) | paint (2D canvas) | bmp (ImageBitmap)
+  //                  | stream (MediaStreamTrackGenerator -> real <video>,
+  //                    letting the browser composite)
   //   ?native=1  - skip WebCodecs entirely, plain <video> + hls.js MSE
   //   ?wc=0      - same as ?native=1 (alias)
-  //   ?fps=N     - paint ceiling (1 default in production); 0 = uncapped
-  //   ?flush=N   - periodic flush interval seconds (30 default); 0 = off
+  //   ?fps=N     - paint ceiling; 0 = uncapped
+  //   ?flush=N   - periodic flush interval seconds (0 = off)
   //   ?level=N   - force a variant index instead of the auto-picked 720p
   //   ?wd=N      - stall watchdog threshold seconds (8 default); 0 = off
   //   ?src=<url> - swap the m3u8 stream (url-encoded)
@@ -352,12 +380,17 @@
   }
   setInterval(updateGoLive, 1500);
 
-  // LoFi fallback: cycle stations if one fails, keep playing.
+  // LoFi station switching. The # button cycles forward on demand; the error
+  // handler cycles too, so one dead station can never leave us silent. Both
+  // share lofiIndex, so a manual switch also moves the fallback cursor.
   let lofiIndex = 0;
-  lofiEl.addEventListener('error', () => {
-    lofiIndex = (lofiIndex + 1) % LOFI.length;
+  function lofiSet(i) {
+    lofiIndex = ((i % LOFI.length) + LOFI.length) % LOFI.length;
     try { lofiEl.src = LOFI[lofiIndex]; lofiEl.play().catch(() => {}); } catch (e) {}
-  });
+  }
+  lofiEl.addEventListener('error', () => lofiSet(lofiIndex + 1));
+  const lofiNext = document.getElementById('lofinx');
+  if (lofiNext) lofiNext.addEventListener('click', (e) => { e.stopPropagation(); lofiSet(lofiIndex + 1); });
 
   // Load LoFi at page start (muted until first gesture) and keep it playing
   // at the inaudible floor under CNBC so it's instantly ready when a break hits.
