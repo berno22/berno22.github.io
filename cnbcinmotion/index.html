@@ -22,19 +22,6 @@
   #err { position: absolute; top: 8px; left: 8px; right: 8px; color: #f66;
          font: 12px system-ui; white-space: pre-wrap; z-index: 20; }
   #err:empty { display: none; }
-  #gotolive {
-    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
-    z-index: 25; cursor: pointer;
-    color: #fff; font: 700 13px/1 system-ui; letter-spacing: 1px; text-transform: uppercase;
-    padding: 10px 22px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14);
-    background: rgba(0,0,0,0.45); backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
-    transition: background .18s ease, transform .12s ease;
-  }
-  #gotolive:hover { background: rgba(255,255,255,0.22); }
-  #gotolive:active { transform: translateX(-50%) scale(0.95); }
-  #gotolive.hidden { display: none; }
   #pread {
     position: absolute; left: 18px; top: 50%; transform: translateY(-50%);
     z-index: 16; color: #b9bbbf; font: 700 13px/1 ui-monospace, Menlo, monospace;
@@ -49,22 +36,45 @@
   }
   #pread.show { visibility: visible; opacity: 1; }
   #adctl {
-    position: absolute; left: 18px; top: 50%; transform: translateY(-50%) scale(0.96);
-    z-index: 15; display: none; flex-direction: column; align-items: center; gap: 8px;
+    position: absolute; left: 18px; top: 50%; transform: translateY(-50%) scale(0.94);
+    z-index: 15; flex-direction: column; align-items: center; gap: 8px;
     padding: 8px 6px; border-radius: 20px;
+    /* Fixed width: at width:auto the panel re-measured every time the
+       countdown appeared or the Ads/CNBC label changed, so the box visibly
+       snapped wider and back. 103px is sized for the longest countdown a
+       break realistically produces - "Ads 9m59s" needs an 89px button, and
+       anything longer is left to spill rather than be clipped. */
+    width: 104px; box-sizing: border-box;
     background: linear-gradient(180deg, rgba(36,38,43,0.55), rgba(20,22,26,0.55));
     backdrop-filter: blur(16px) saturate(1.2);
     -webkit-backdrop-filter: blur(16px) saturate(1.2);
     border: 1px solid rgba(255,255,255,0.10);
     box-shadow: 0 10px 30px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
-    visibility: hidden; opacity: 0; pointer-events: none;
-    transition: opacity .22s ease, transform .22s ease, visibility .22s;
+    /* Toggled with visibility/opacity only, never display: a display:none ->
+       display:flex flip cannot be transitioned, which is what made the panel
+       pop in and vanish. On the way out the visibility change is delayed by
+       the fade duration so the panel stays visible for the whole fade out. */
+    display: flex; visibility: hidden; opacity: 0; pointer-events: none;
+    transition: opacity .3s ease, transform .3s cubic-bezier(.22,.61,.36,1), visibility 0s linear .3s;
+    will-change: opacity, transform;
   }
-  #adctl.show { display: flex; visibility: visible; opacity: 1; transform: translateY(-50%) scale(1); pointer-events: auto; }
+  #adctl.show {
+    visibility: visible; opacity: 1; transform: translateY(-50%) scale(1); pointer-events: auto;
+    transition: opacity .3s ease, transform .3s cubic-bezier(.22,.61,.36,1), visibility 0s;
+  }
+  /* All three pills share one padding, so the Ads button is the same shape as
+     LoFi and Mute even while it carries a countdown. The side padding is 9px
+     rather than 18px so the widest countdown, "Ads 9m59s", still fits the
+     fixed panel; min-width holds the tap target at 58px for short labels. */
   .seg {
     appearance: none; border: none; background: transparent; cursor: pointer;
     color: #b9bbbf; font: 600 12px/1 system-ui;
-    letter-spacing: .4px; padding: 9px 18px; border-radius: 999px; min-width: 58px;
+    letter-spacing: .4px; padding: 9px 9px; border-radius: 999px; min-width: 58px;
+    /* The label and the countdown are two separate inline-blocks, so without
+       this the break opportunity between them let "9m59s" wrap onto its own
+       line and the pill grew to 48px tall - a different shape from the other
+       two. nowrap keeps "Ads 9m59s" on one line, as one string. */
+    white-space: nowrap;
     -webkit-tap-highlight-color: transparent;
     transition: background .18s ease, color .18s ease, transform .12s ease;
   }
@@ -74,19 +84,56 @@
     background: #fff; color: #111; font-weight: 700;
     box-shadow: 0 2px 10px rgba(0,0,0,0.35);
   }
-  /* Which LoFi station the bed is currently on: a dim mono caption tucked
-     under the LoFi button, clipped so a long name can never widen the pill. */
+  /* Which LoFi station the bed is currently on. Lives outside the break
+     selector, hovering just above it and sharing its left edge and width, so
+     the caption can never widen or shift the panel. --adctlW/--adctlH are
+     written from the panel's real layout box by syncNameBox(), so this stays
+     aligned if the panel's size ever changes (font scaling, a new row). */
   #lofiname {
-    color: #9a9ca1; font: 600 10px/1 ui-monospace, Menlo, monospace;
-    letter-spacing: .5px; text-transform: uppercase; text-align: center;
-    max-width: 86px; margin: -3px 0 0; padding: 0 4px;
+    position: absolute; left: 18px; width: var(--adctlW, 88px);
+    top: 50%; z-index: 16;
+    transform: translateY(-50%) translateY(calc(-1 * (var(--adctlH, 120px) / 2 + 14px)));
+    color: #c2c4c9; font: 600 11px/1 ui-monospace, Menlo, monospace;
+    letter-spacing: .6px; text-transform: uppercase; text-align: center;
+    box-sizing: border-box; padding: 0 4px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    /* Sits directly on the video now, so it carries its own contrast. */
+    text-shadow: 0 1px 3px rgba(0,0,0,0.85), 0 0 10px rgba(0,0,0,0.55);
     -webkit-user-select: none; user-select: none; pointer-events: none;
+    /* Fades with the panel. visibility is delayed by the fade duration on the
+       way out so the text stays legible for the whole fade. */
+    visibility: hidden; opacity: 0;
+    transition: opacity .3s ease, visibility 0s linear .3s;
   }
-  #adcount {
-    color: #e6e6e7; font: 600 11px/1 ui-monospace, Menlo, monospace; letter-spacing: 1px;
-    padding: 4px 10px; border-radius: 999px; margin-top: 2px;
-    background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.07);
+  #lofiname.show {
+    visibility: visible; opacity: 1;
+    transition: opacity .3s ease, visibility 0s;
+  }
+  /* Break countdown, riding along inside the Ads/CNBC button as a dim mono
+     suffix ("Ads 30s") in the same type as the station caption. Folding it
+     into the button saves a whole row, and keeps the panel fixed width.
+     Only ever populated with a real countdown, so no placeholder '--'.
+     Collapsed with max-width rather than visibility:hidden, which still
+     reserves layout space and pushed "CNBC" off-centre in the pill. */
+  /* The label and the countdown are two halves of one string - "Ads 9m59s" -
+     same font, same colour, same line, so they read as one word. The suffix
+     hides itself with clip-path rather than overflow:hidden, because an
+     inline-block with hidden overflow aligns by its bottom edge instead of its
+     text baseline, which pushed the countdown 2px below the label and made
+     the pill 3px taller than LoFi and Mute. Clipped, it keeps a real text
+     baseline and the shared line box, so all three pills stay identical. */
+  #adlabel { /* plain inline run: natural metrics, natural baseline */ }
+  #adcd {
+    display: inline-block; vertical-align: baseline; white-space: nowrap;
+    margin-left: 0; max-width: 0; clip-path: inset(0 100% 0 0);
+    font: inherit; letter-spacing: inherit; color: inherit;
+    -webkit-user-select: none; user-select: none; pointer-events: none;
+    opacity: 0;
+    transition: opacity .2s ease, max-width .2s ease, margin-left .2s ease,
+                clip-path .2s ease;
+  }
+  #adcd.show {
+    margin-left: 4px; max-width: 60px; clip-path: inset(0 0 0 0); opacity: 1;
   }
 </style>
 </head>
@@ -95,14 +142,12 @@
   <video id="video" muted playsinline preload="auto"></video>
   <canvas id="frame"></canvas>
   <div id="overlay">Tap for sound</div>
-  <button id="gotolive" class="hidden">Go LIVE</button>
   <div id="err"></div>
+  <div id="lofiname">Jamz LoFi</div>
   <div id="adctl">
     <button class="seg" type="button" data-mode="lofi" title="LoFi bed - tap again for the next station">LoFi</button>
-    <div id="lofiname">Jamz LoFi</div>
     <button class="seg" type="button" data-mode="mute">Mute</button>
-    <button class="seg" type="button" data-mode="ads">Ads</button>
-    <div id="adcount">--</div>
+    <button class="seg" type="button" data-mode="ads"><span id="adlabel">Ads</span><span id="adcd"></span></button>
   </div>
   <div id="pread"></div>
   <audio id="lofi" crossorigin="anonymous" preload="auto" playsinline></audio>
@@ -121,17 +166,19 @@
   const adctl = document.getElementById('adctl');
   const wrap = document.getElementById('wrap');
   const segs = Array.from(document.querySelectorAll('#adctl .seg'));
+  const adsSeg = document.querySelector('#adctl .seg[data-mode="ads"]');
   const lofiEl = document.getElementById('lofi');
   const lofiNameEl = document.getElementById('lofiname');
-  const adcount = document.getElementById('adcount');
+  const adsLabel = document.getElementById('adlabel');
+  const adcd = document.getElementById('adcd');
   const pread = document.getElementById('pread');
   const pan = document.getElementById('frame');
   const panCtx = pan.getContext('2d');
   let panRAF = null;
   // Lock screen / miniplayer: always advertise CNBC, never the LoFi bed.
   // Media Session metadata is page-level: whatever session the OS surfaces
-  // shows this branding. Play/pause keys drive the main element (pause
-  // surfaces the Go LIVE button via the existing watcher).
+  // shows this branding. Play/pause keys drive the main element; if it is ever
+  // paused the live-edge watcher above resumes it.
   if ('mediaSession' in navigator) {
     try {
       navigator.mediaSession.metadata = new MediaMetadata({
@@ -161,19 +208,20 @@
     panRAF = requestAnimationFrame(pumpFrames);
   }
   // LoFi bed stations. The FastCast4u "lofi hip hop" AutoDJ channel leads the
-  // list as the default bed, with the loficafe/laut streams behind it as the
+  // list as the default bed, with the loficafe streams behind it as the
   // alternates the LoFi button cycles through on each tap.
   // HTTPS is required, not http: this page is served over HTTPS, so an http://
   // source is blocked as mixed content. usa9 serves HTTPS over GET (it answers
   // HEAD with a bogus HTTP/0.9, which is harmless for <audio src>).
+  // Laut.fm was dropped: it never had a usable direct stream here, and the
+  // playlist host refuses cross-origin so it could not be added reliably.
   const LOFI = ['https://usa9.fastcast4u.com/proxy/jamz?mp=/1',
                 'https://radio.loficafe.net/listen/chilling/radio.mp3',
                 'https://radio.loficafe.net/listen/sleeping/radio.mp3',
-                'https://radio.loficafe.net/listen/working/radio.mp3',
-                'https://laut.fm/lofi'];
-  // Short captions for the label under the LoFi button. Deliberately terse so
-  // they fit one line at 10px in the pill, which is ~103px wide.
-  const LABELS = ['Jamz LoFi', 'Cafe Chill', 'Cafe Sleep', 'Cafe Work', 'Laut LoFi'];
+                'https://radio.loficafe.net/listen/working/radio.mp3'];
+  // Short captions for the label above the break selector. Deliberately terse
+  // so they fit one line at 11px in the panel.
+  const LABELS = ['Jamz LoFi', 'Cafe Chill', 'Cafe Sleep', 'Cafe Work'];
   // URL knobs, kept live on the deployed page so behaviour can be A/B'd in the
   // car without a redeploy:
   //   ?audioonly=1 - element takes the master's audio rendition only, so it
@@ -337,11 +385,14 @@
   window.addEventListener('pointerdown', markActivated);
   window.addEventListener('keydown', markActivated);
 
-  // "Go LIVE" button: jumps to the live edge when paused, then resumes playback.
-  const gotolive = document.getElementById('gotolive');
+  // Live-edge recovery. The "Go LIVE" button that used to sit at the top of the
+  // frame is gone, so the resync it performed now happens on its own: if
+  // playback is paused we simply try to resume, and if it has drifted behind
+  // the live edge we snap forward. Silent, and only past a margin, so a
+  // transient hiccup in liveSyncPosition cannot cause a visible jump.
   let started = false;
+  const LIVE_MARGIN_S = 5;
   function goLive() {
-    gotolive.classList.add('hidden');
     if (!hls) {
       // Native path: seek to the end of the live window and resume.
       if (video.seekable && video.seekable.length) {
@@ -361,24 +412,22 @@
     setTimeout(toEdge, 120);
     setTimeout(() => video.play().catch(() => {}), 450);
   }
-  gotolive.addEventListener('click', goLive);
 
-  // Show "Go LIVE" whenever the player is paused OR playing behind the live edge.
-  const LIVE_MARGIN_S = 5;
-  function updateGoLive() {
-    let show = false;
-    if (started) {
-      if (video.paused) {
-        show = true;
-      } else if (hls && hls.liveSyncPosition != null) {
-        show = (hls.liveSyncPosition - video.currentTime) > LIVE_MARGIN_S;
-      } else if (video.seekable && video.seekable.length) {
-        show = (video.seekable.end(video.seekable.length - 1) - video.currentTime) > LIVE_MARGIN_S;
-      }
-    }
-    gotolive.classList.toggle('hidden', !show);
-  }
-  setInterval(updateGoLive, 1500);
+  let resyncing = false;
+  setInterval(() => {
+    if (!started) return;
+    if (video.paused) { video.play().catch(() => {}); return; }
+    if (resyncing) return;
+    const behind = hls && hls.liveSyncPosition != null
+      ? (hls.liveSyncPosition - video.currentTime) > LIVE_MARGIN_S
+      : (video.seekable && video.seekable.length
+          ? (video.seekable.end(video.seekable.length - 1) - video.currentTime) > LIVE_MARGIN_S
+          : false);
+    if (!behind) return;
+    resyncing = true;
+    goLive();
+    setTimeout(() => { resyncing = false; }, 1500);
+  }, 1500);
 
   // LoFi station switching. A click on the LoFi button steps to the next bed
   // source, and the error handler cycles too, so one dead station can never
@@ -408,6 +457,15 @@
     try { localStorage.setItem('cnbcBreakMode', m); } catch (e) {}
     for (const s of segs) s.classList.toggle('on', s.dataset.mode === m);
     applyAudioLevels();
+    syncAdctl();   // the station caption's visibility depends on the mode
+  }
+
+  // Countdown for the inline "Ads 2m30s" suffix. Always spells out minutes and
+  // seconds with m and s rather than a colon, matching the surrounding text,
+  // and always shows both units so the reading never changes shape mid-break.
+  function fmtClock(sec) {
+    if (sec < 60) return sec + 's';
+    return Math.floor(sec / 60) + 'm' + (sec % 60) + 's';
   }
 
   function fmtTime(sec) {
@@ -446,9 +504,33 @@
   let hoverReveal = false;    // pointer (mouse) is over the stage
   let tapReveal = false;      // opened by a tap; clears on idle
   let revealTimer = null;
-  const REVEAL_IDLE_MS = 5000;
+  // How long a tap-opened panel lingers with no further interaction. Short
+  // enough to clear out of the way on its own, long enough to read the station
+  // label and make a choice.
+  const REVEAL_IDLE_MS = 2600;
+  // Publish the panel's real layout box so the station caption above it can
+  // line up without hardcoding a size. offsetWidth/Height ignore the panel's
+  // scale() transform, so this stays correct while it is mid-fade.
+  function syncNameBox() {
+    const w = adctl.offsetWidth, h = adctl.offsetHeight;
+    if (!w || !h) return;
+    if (lofiNameEl.dataset.boxW === String(w) && lofiNameEl.dataset.boxH === String(h)) return;
+    lofiNameEl.dataset.boxW = w; lofiNameEl.dataset.boxH = h;
+    wrap.style.setProperty('--adctlW', w + 'px');
+    wrap.style.setProperty('--adctlH', h + 'px');
+  }
+
   function syncAdctl() {
-    adctl.classList.toggle('show', adBreak || hoverReveal || tapReveal);
+    const open = adBreak || hoverReveal || tapReveal;
+    adctl.classList.toggle('show', open);
+    // The caption is only meaningful while the LoFi bed is the chosen break
+    // behaviour - with Mute or Ads selected there is no bed to name.
+    lofiNameEl.classList.toggle('show', open && breakMode === 'lofi');
+    syncNameBox();
+    // The third button names what is actually on screen: the commercials while
+    // they run, CNBC the rest of the time. Only the label span is rewritten -
+    // touching adsSeg.textContent would wipe the countdown suffix inside it.
+    if (adsLabel) adsLabel.textContent = adBreak ? 'Ads' : 'CNBC';
   }
   function clearRevealTimer() {
     if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
@@ -458,21 +540,24 @@
     if (on) clearRevealTimer();
     syncAdctl();
   }
-  function revealByTap() {
-    tapReveal = !tapReveal;
+  function armRevealTimer() {
     clearRevealTimer();
     if (tapReveal) revealTimer = setTimeout(() => { tapReveal = false; syncAdctl(); }, REVEAL_IDLE_MS);
+  }
+  function revealByTap() {
+    tapReveal = !tapReveal;
+    armRevealTimer();
     syncAdctl();
   }
   // Mouse: moving over the stage shows the panel, leaving hides it again.
   wrap.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') revealByHover(true); });
   wrap.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') revealByHover(false); });
   // Touch: a tap on the picture toggles it. Taps that land on a control are
-  // left alone so the buttons, the pre-roll and the Go LIVE pill still work.
+  // left alone so the buttons and the pre-roll still work.
   wrap.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'mouse') return;
     const t = e.target;
-    if (t.closest && t.closest('#adctl, #gotolive, #pread, #err, #overlay')) return;
+    if (t.closest && t.closest('#adctl, #pread, #err, #overlay')) return;
     revealByTap();
   });
 
@@ -494,13 +579,16 @@
     if (adBreak) {
       // In a break: hide the pre-roll countdown, reveal the mode selector.
       pread.classList.remove('show');
-      adcount.textContent = activeEnd != null
-        ? fmtTime(Math.max(0, Math.ceil((activeEnd - now) / 1000)))
-        : '--';
+      if (activeEnd != null) {
+        adcd.textContent = fmtClock(Math.max(0, Math.ceil((activeEnd - now) / 1000)));
+        adcd.classList.add('show');
+      } else {
+        adcd.classList.remove('show');
+      }
       applyAudioLevels();
     } else {
       // Pre-break: as soon as SCTE-35 publishes a future break, count down.
-      adcount.textContent = '--';
+      adcd.classList.remove('show');
       if (nextStart !== null) {
         pread.textContent = 'Ads in ' + fmtTime(Math.max(0, Math.ceil((nextStart - now) / 1000)));
         pread.classList.add('show');
