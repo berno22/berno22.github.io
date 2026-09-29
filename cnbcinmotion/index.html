@@ -74,6 +74,15 @@
     background: #fff; color: #111; font-weight: 700;
     box-shadow: 0 2px 10px rgba(0,0,0,0.35);
   }
+  /* Which LoFi station the bed is currently on: a dim mono caption tucked
+     under the LoFi button, clipped so a long name can never widen the pill. */
+  #lofiname {
+    color: #9a9ca1; font: 600 10px/1 ui-monospace, Menlo, monospace;
+    letter-spacing: .5px; text-transform: uppercase; text-align: center;
+    max-width: 86px; margin: -3px 0 0; padding: 0 4px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    -webkit-user-select: none; user-select: none; pointer-events: none;
+  }
   #adcount {
     color: #e6e6e7; font: 600 11px/1 ui-monospace, Menlo, monospace; letter-spacing: 1px;
     padding: 4px 10px; border-radius: 999px; margin-top: 2px;
@@ -90,6 +99,7 @@
   <div id="err"></div>
   <div id="adctl">
     <button class="seg" type="button" data-mode="lofi" title="LoFi bed - tap again for the next station">LoFi</button>
+    <div id="lofiname">Jamz LoFi</div>
     <button class="seg" type="button" data-mode="mute">Mute</button>
     <button class="seg" type="button" data-mode="ads">Ads</button>
     <div id="adcount">--</div>
@@ -109,8 +119,10 @@
   const overlay = document.getElementById('overlay');
   const errBox = document.getElementById('err');
   const adctl = document.getElementById('adctl');
+  const wrap = document.getElementById('wrap');
   const segs = Array.from(document.querySelectorAll('#adctl .seg'));
   const lofiEl = document.getElementById('lofi');
+  const lofiNameEl = document.getElementById('lofiname');
   const adcount = document.getElementById('adcount');
   const pread = document.getElementById('pread');
   const pan = document.getElementById('frame');
@@ -159,6 +171,9 @@
                 'https://radio.loficafe.net/listen/sleeping/radio.mp3',
                 'https://radio.loficafe.net/listen/working/radio.mp3',
                 'https://laut.fm/lofi'];
+  // Short captions for the label under the LoFi button. Deliberately terse so
+  // they fit one line at 10px in the pill, which is ~103px wide.
+  const LABELS = ['Jamz LoFi', 'Cafe Chill', 'Cafe Sleep', 'Cafe Work', 'Laut LoFi'];
   // URL knobs, kept live on the deployed page so behaviour can be A/B'd in the
   // car without a redeploy:
   //   ?audioonly=1 - element takes the master's audio rendition only, so it
@@ -372,8 +387,10 @@
   let lofiIndex = 0;
   function lofiSet(i) {
     lofiIndex = ((i % LOFI.length) + LOFI.length) % LOFI.length;
+    if (lofiNameEl) lofiNameEl.textContent = LABELS[lofiIndex] || '';
     try { lofiEl.src = LOFI[lofiIndex]; lofiEl.play().catch(() => {}); } catch (e) {}
   }
+  if (lofiNameEl) lofiNameEl.textContent = LABELS[lofiIndex] || '';
   lofiEl.addEventListener('error', () => lofiSet(lofiIndex + 1));
 
   // Load LoFi at page start (muted until first gesture) and keep it playing
@@ -422,6 +439,43 @@
     return out;
   }
 
+  // The break selector is normally up only during a commercial break, but it
+  // is useful on demand too: hover (desktop) or tap (touch) brings it up at
+  // any time, and it goes away again on leave or after a few idle seconds.
+  // An actual ad break always wins, so the selector never hides mid-break.
+  let hoverReveal = false;    // pointer (mouse) is over the stage
+  let tapReveal = false;      // opened by a tap; clears on idle
+  let revealTimer = null;
+  const REVEAL_IDLE_MS = 5000;
+  function syncAdctl() {
+    adctl.classList.toggle('show', adBreak || hoverReveal || tapReveal);
+  }
+  function clearRevealTimer() {
+    if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
+  }
+  function revealByHover(on) {
+    hoverReveal = on;
+    if (on) clearRevealTimer();
+    syncAdctl();
+  }
+  function revealByTap() {
+    tapReveal = !tapReveal;
+    clearRevealTimer();
+    if (tapReveal) revealTimer = setTimeout(() => { tapReveal = false; syncAdctl(); }, REVEAL_IDLE_MS);
+    syncAdctl();
+  }
+  // Mouse: moving over the stage shows the panel, leaving hides it again.
+  wrap.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') revealByHover(true); });
+  wrap.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') revealByHover(false); });
+  // Touch: a tap on the picture toggles it. Taps that land on a control are
+  // left alone so the buttons, the pre-roll and the Go LIVE pill still work.
+  wrap.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse') return;
+    const t = e.target;
+    if (t.closest && t.closest('#adctl, #gotolive, #pread, #err, #overlay')) return;
+    revealByTap();
+  });
+
   function evaluateBreak() {
     const now = programNow();
     const wins = breakWindows();
@@ -436,7 +490,7 @@
     }
     adBreak = inside;
     if (adBreak !== wasInAd) wasInAd = adBreak;
-    adctl.classList.toggle('show', adBreak);
+    syncAdctl();
     if (adBreak) {
       // In a break: hide the pre-roll countdown, reveal the mode selector.
       pread.classList.remove('show');
