@@ -75,17 +75,116 @@
         outline: 2px solid var(--accent);
         outline-offset: 3px;
       }
+      /* The Live TV row is split in two: the button itself opens the page the
+         plain way, and a full-screen control in its right corner opens the
+         redirect the other links on this page use. Two sibling anchors, because
+         one <a> nested inside another is not valid and browsers will not
+         reliably keep the inner link clickable. */
+      .split {
+        position: relative;
+      }
+      .split > .main {
+        /* Equal padding on both sides, because the label is centred in the
+           content box: with only the right side padded the text sits 12px left
+           of the button's centre. The icon floats on top of the right padding. */
+        padding-left: 68px;
+        padding-right: 68px;
+      }
+      /* Move the hover arrow clear of the full-screen control instead of
+         letting the two overlap. */
+      .split > .main::after {
+        right: 72px;
+      }
+      .split > .fs {
+        position: absolute;
+        right: 14px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 10px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        box-shadow: none;
+      }
+      .split > .fs::after {
+        content: none;
+      }
+      .split > .fs svg {
+        width: 19px;
+        height: 19px;
+        display: block;
+      }
+      /* A full-screen button needs the same shape three more times. One symbol,
+         referenced, beats four copies of the same four paths. */
+      .sprite {
+        position: absolute;
+        width: 0;
+        height: 0;
+        overflow: hidden;
+      }
+      .split > .fs:hover {
+        color: var(--text);
+        border-color: var(--line);
+        background: #f5f5f5;
+        /* Keep the vertical centring: the base hover lifts by 2px, which would
+           knock the glyph out of line with the label. */
+        transform: translateY(-50%);
+        box-shadow: none;
+      }
+      .split > .fs:active {
+        transform: translateY(-50%) scale(0.94);
+      }
       @media (max-width: 480px) {
         a { font-size: 16px; }
       }
     </style>
   </head>
   <body>
+    <svg class="sprite" aria-hidden="true" focusable="false">
+      <symbol id="ico-fullscreen" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 3H5a2 2 0 0 0-2 2v3"></path>
+        <path d="M16 3h3a2 2 0 0 1 2 2v3"></path>
+        <path d="M8 21H5a2 2 0 0 1-2-2v-3"></path>
+        <path d="M16 21h3a2 2 0 0 0 2-2v-3"></path>
+      </symbol>
+    </svg>
+
     <div class="links">
-      <a href="https://www.youtube.com/redirect?q=https://berno22.github.io/livetv/">Live TV</a>
-      <a href="https://www.youtube.com/redirect?q=https://app.plex.tv/">Plex</a>
-      <a href="https://www.youtube.com/redirect?q=https://cinejoy.pk">Streaming</a>
-      <a href="https://www.youtube.com/redirect?q=https://berno22.github.io/cnbc.html">CNBC</a>
+      <div class="split">
+        <a class="main" href="https://berno22.github.io/livetv/">Live TV</a>
+        <a class="fs" href="https://www.youtube.com/redirect?q=https://berno22.github.io/livetv/"
+           title="Live TV full screen" aria-label="Live TV full screen">
+          <svg aria-hidden="true" focusable="false"><use href="#ico-fullscreen"></use></svg>
+        </a>
+      </div>
+      <div class="split">
+        <a class="main" href="https://app.plex.tv/">Plex</a>
+        <a class="fs" href="https://www.youtube.com/redirect?q=https://app.plex.tv/"
+           title="Plex full screen" aria-label="Plex full screen">
+          <svg aria-hidden="true" focusable="false"><use href="#ico-fullscreen"></use></svg>
+        </a>
+      </div>
+      <div class="split">
+        <a class="main" href="https://cinejoy.pk">Streaming</a>
+        <a class="fs" href="https://www.youtube.com/redirect?q=https://cinejoy.pk"
+           title="Streaming full screen" aria-label="Streaming full screen">
+          <svg aria-hidden="true" focusable="false"><use href="#ico-fullscreen"></use></svg>
+        </a>
+      </div>
+      <div class="split">
+        <a class="main" href="https://berno22.github.io/cnbc.html">CNBC</a>
+        <a class="fs" href="https://www.youtube.com/redirect?q=https://berno22.github.io/cnbc.html"
+           title="CNBC full screen" aria-label="CNBC full screen">
+          <svg aria-hidden="true" focusable="false"><use href="#ico-fullscreen"></use></svg>
+        </a>
+      </div>
       <a href="https://berno22.github.io/cnbcaudio/">CNBC Audio</a>
       <a href="http://96.244.150.95:8787">SiriusXM</a>
       <a href="https://berno22.github.io/garagedoor/">Garage Door</a>
