@@ -100,8 +100,13 @@
   const video = document.getElementById('video');
   // LoFi level discriminator: Real Safari (WebKit bug - no Web Audio routing
   // for HLS, element volume only) gets 40%. Everything else - desktop Chrome,
-  // Tesla Chromium, Firefox - gets 70%. Tesla Chromium also reports native HLS,
-  // so we must NOT key off canPlayType('mpegurl') here.
+  // Tesla Chromium, Firefox - runs the bed at full element volume. Tesla
+  // Chromium also reports native HLS, so we must NOT key off
+  // canPlayType('mpegurl') here.
+  // The bed cannot go through the 8x boost graph below: its radio servers omit
+  // CORS headers, and Chrome outputs silence for non-CORS-clean media in
+  // createMediaElementSource. So 1.0 here is the loudest it can get, and it is
+  // still ~8x quieter than CNBC during a break.
   const ua = navigator.userAgent;
   const isRealSafari = /Safari/.test(ua) && !/Chrome|Chromium|CriOS|Edg|OPR|\bFirefox\b/.test(ua);
   const nativeHls = !!(video.canPlayType && video.canPlayType('application/vnd.apple.mpegurl'));
@@ -235,7 +240,7 @@
 
     // LoFi target: prominent only during a lofi break; otherwise the
     // above-mute floor (never 0, never muted) so it's instantly ready.
-    const lofiLevel = isRealSafari ? 0.4 : 0.7;
+    const lofiLevel = isRealSafari ? 0.4 : 1.0;
     const lofiProminent = !!(adBreak && breakMode === 'lofi');
     const lofiTarget = lofiProminent ? lofiLevel : LOFI_LOW;
 
