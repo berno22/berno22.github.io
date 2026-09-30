@@ -56,6 +56,31 @@
     transition: opacity .22s ease, transform .22s ease, visibility .22s;
   }
   #adctl.show { display: flex; visibility: visible; opacity: 1; transform: translateY(-50%) scale(1); pointer-events: auto; }
+  /* Which LoFi station the bed is currently on. Lives just above the break
+     selector, sharing its left edge and width, so the caption can never widen
+     or shift the panel. --adctlW/--adctlH are written from the panel's real
+     layout box by syncNameBox(), so this stays aligned if the panel's size ever
+     changes (font scaling, a new row). */
+  #lofiname {
+    position: absolute; left: 18px; width: var(--adctlW, 88px);
+    top: 50%; z-index: 16;
+    transform: translateY(-50%) translateY(calc(-1 * (var(--adctlH, 120px) / 2 + 14px)));
+    color: #c2c4c9; font: 600 11px/1 ui-monospace, Menlo, monospace;
+    letter-spacing: .6px; text-transform: uppercase; text-align: center;
+    box-sizing: border-box; padding: 0 4px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    /* Sits directly on the video, so it carries its own contrast. */
+    text-shadow: 0 1px 3px rgba(0,0,0,0.85), 0 0 10px rgba(0,0,0,0.55);
+    -webkit-user-select: none; user-select: none; pointer-events: none;
+    /* Fades with the panel. visibility is delayed by the fade duration on the
+       way out so the text stays legible for the whole fade. */
+    visibility: hidden; opacity: 0;
+    transition: opacity .3s ease, visibility 0s linear .3s;
+  }
+  #lofiname.show {
+    visibility: visible; opacity: 1;
+    transition: opacity .3s ease, visibility 0s;
+  }
   .seg {
     appearance: none; border: none; background: transparent; cursor: pointer;
     color: #b9bbbf; font: 600 12px/1 system-ui;
@@ -88,6 +113,7 @@
     <button class="seg" type="button" data-mode="ads">Ads</button>
     <div id="adcount">--</div>
   </div>
+  <div id="lofiname">Jamz LoFi</div>
   <div id="pread"></div>
   <audio id="lofi" crossorigin="anonymous" preload="auto" playsinline></audio>
 </div>
@@ -103,14 +129,28 @@
   const overlay = document.getElementById('overlay');
   const errBox = document.getElementById('err');
   const adctl = document.getElementById('adctl');
+  const wrap = document.getElementById('wrap');
+  const lofiNameEl = document.getElementById('lofiname');
   const segs = Array.from(document.querySelectorAll('#adctl .seg'));
   const lofiEl = document.getElementById('lofi');
   const adcount = document.getElementById('adcount');
   const pread = document.getElementById('pread');
-  const LOFI = ['https://radio.loficafe.net/listen/chilling/radio.mp3',
+  // LoFi bed stations. The FastCast4u "lofi hip hop" AutoDJ channel leads the
+  // list as the default bed, with the loficafe streams behind it as the
+  // alternates the LoFi button cycles through on each tap.
+  // HTTPS is required, not http: this page is served over HTTPS, so an http://
+  // source is blocked as mixed content. usa9 serves HTTPS over GET (it answers
+  // HEAD with a bogus HTTP/0.9, which is harmless for <audio src>).
+  // Laut.fm is gone, replaced by the FastCast4u channel: it never had a usable
+  // direct stream here, and the playlist host refuses cross-origin, so the
+  // error handler used to cycle straight past it to silence.
+  const LOFI = ['https://usa9.fastcast4u.com/proxy/jamz?mp=/1',
+                'https://radio.loficafe.net/listen/chilling/radio.mp3',
                 'https://radio.loficafe.net/listen/sleeping/radio.mp3',
-                'https://radio.loficafe.net/listen/working/radio.mp3',
-                'https://laut.fm/lofi'];
+                'https://radio.loficafe.net/listen/working/radio.mp3'];
+  // Short captions for the label above the break selector. Deliberately terse
+  // so they fit one line at 11px in the panel.
+  const LABELS = ['Jamz LoFi', 'Cafe Chill', 'Cafe Sleep', 'Cafe Work'];
   const src = 'https://cnbc.mt.linear.viewlift.com/v1/master/dfe581e0a446a1e548014078b2d81b62b917979d/usanetwork-linear-external-hls-primary-cnbc-v2/Content/Channel/886a397d-ff30-4021-eb16-bb73c658c033/HLS_CLEAR/master_5m.m3u8';
 
   let hls = null;
@@ -290,12 +330,30 @@
   }
   setInterval(updateGoLive, 1500);
 
-  // LoFi fallback: cycle stations if one fails, keep playing.
+  // LoFi station switching. A click on the LoFi button steps to the next bed
+  // source, and the error handler cycles too, so one dead station can never
+  // leave us silent. Both share lofiIndex, so a manual switch also moves the
+  // fallback cursor.
   let lofiIndex = 0;
-  lofiEl.addEventListener('error', () => {
-    lofiIndex = (lofiIndex + 1) % LOFI.length;
+  function lofiSet(i) {
+    lofiIndex = ((i % LOFI.length) + LOFI.length) % LOFI.length;
+    if (lofiNameEl) lofiNameEl.textContent = LABELS[lofiIndex] || '';
     try { lofiEl.src = LOFI[lofiIndex]; lofiEl.play().catch(() => {}); } catch (e) {}
-  });
+  }
+  if (lofiNameEl) lofiNameEl.textContent = LABELS[lofiIndex] || '';
+  lofiEl.addEventListener('error', () => lofiSet(lofiIndex + 1));
+
+  // The station caption shares the panel's left edge and width, so the two line
+  // up without hardcoding a size. offsetWidth/Height ignore the panel's scale()
+  // transform, so this stays correct while it is mid-fade.
+  function syncNameBox() {
+    const w = adctl.offsetWidth, h = adctl.offsetHeight;
+    if (!w || !h) return;
+    if (lofiNameEl.dataset.boxW === String(w) && lofiNameEl.dataset.boxH === String(h)) return;
+    lofiNameEl.dataset.boxW = w; lofiNameEl.dataset.boxH = h;
+    wrap.style.setProperty('--adctlW', w + 'px');
+    wrap.style.setProperty('--adctlH', h + 'px');
+  }
 
   // Stall recovery: 'error' only fires on hard failure. If the continuous
   // bed stalls (no data, no error) it would otherwise sit silent into a
@@ -377,6 +435,10 @@
     adBreak = inside;
     if (adBreak !== wasInAd) wasInAd = adBreak;
     adctl.classList.toggle('show', adBreak);
+    // The caption is only meaningful while the LoFi bed is the chosen break
+    // behaviour - with Mute or Ads selected there is no bed to name.
+    if (lofiNameEl) lofiNameEl.classList.toggle('show', adBreak && breakMode === 'lofi');
+    syncNameBox();
     if (adBreak) {
       // In a break: hide the pre-roll countdown, reveal the mode selector.
       pread.classList.remove('show');
@@ -449,7 +511,13 @@
   }
 
   for (const s of segs) {
-    s.addEventListener('click', (e) => { e.stopPropagation(); setBreakMode(s.dataset.mode); });
+    s.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setBreakMode(s.dataset.mode);
+      // Tapping LoFi also steps to the next station, so the bed is switchable
+      // without hunting for a separate control.
+      if (s.dataset.mode === 'lofi') lofiSet(lofiIndex + 1);
+    });
   }
   setBreakMode(breakMode);
 
