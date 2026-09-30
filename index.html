@@ -12,6 +12,10 @@
         --muted: #777777;
         --line: #d0d0d0;
         --accent: #2f2f2f;
+        /* One grey for both the button labels and the brand marks beside them,
+           so a logo reads as part of its label rather than as a competing
+           element. --text is still used for hover and for the All Media link. */
+        --mark: #555555;
       }
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body {
@@ -35,7 +39,9 @@
         position: relative;
         display: block;
         text-decoration: none;
-        color: var(--text);
+        /* The label and any brand mark beside it share one colour, so a logo
+           reads as part of the label rather than as a competing element. */
+        color: var(--mark);
         background: var(--surface);
         border: 1px solid var(--line);
         border-radius: 14px;
@@ -83,30 +89,94 @@
       .split {
         position: relative;
       }
+      .split > .main,
+      .has-logo {
+        /* A flex row so a brand mark can sit beside the label and the pair still
+           centres as one unit. */
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 13px;
+      }
       .split > .main {
         /* Equal padding on both sides, because the label is centred in the
            content box: with only the right side padded the text sits 12px left
-           of the button's centre. The icon floats on top of the right padding. */
-        padding-left: 68px;
-        padding-right: 68px;
+           of the button's centre. The icon floats on top of the right padding,
+           so that side carries room for the control - now 44px plus a 13px
+           inset. Both sides grow together, which is what keeps the label
+           centred. The button's own width is unaffected either way. */
+        padding-left: 72px;
+        padding-right: 72px;
+      }
+      /* A brand mark in place of, or in front of, the label.
+         logos/*.png are black silhouettes with clean alpha, used as a CSS mask
+         so the colour comes from CSS rather than being baked into the file - a
+         mark can then never drift out of step with the rest of the page.
+         The marks are grey and the text is near-black, so a logo reads as
+         artwork sitting beside a label rather than as more label. Tying it to a
+         token rather than currentColor is the point: it stays the same shade
+         whatever colour the link is in, so it does not flip to near-black on
+         hover and lose that separation.
+         ONE height for every mark, so a brand that appears more than once - CNBC
+         is on three rows - is the same size in all of them. Widths follow each
+         wordmark's own proportions, because "SiriusXM" at 6.4:1 and "plex" at
+         2.2:1 cannot share a width. */
+      .lg {
+        flex: none;
+        height: 18px;
+        width: var(--w, 44px);
+        background-color: var(--mark);
+        -webkit-mask: var(--m) center / contain no-repeat;
+        mask: var(--m) center / contain no-repeat;
+      }
+      .lg-plex     { --m: url(logos/plex.png);     --w: 39px; }
+      .lg-cnbc     { --m: url(logos/cnbc.png);     --w: 56px; }
+      .lg-siriusxm { --m: url(logos/siriusxm.png); --w: 116px; }
+      .lg-live     { --m: url(logos/live-tv.png);  --w: 24px; }
+      /* Where the mark is a prefix on a phrase - "CNBC Audio" as the mark plus
+         "Audio" - the gap closes up so the two read as one phrase rather than a
+         logo with a caption. The visible text is then only "Audio", so these
+         rows carry an aria-label to keep the full name as the accessible name. */
+      .has-logo-inline { gap: 7px; }
+      /* When a brand mark stands in for the label, the label stays in the DOM so
+         screen readers still announce "Plex", but is hidden from view. Every
+         real brand mark for this page - Plex, CNBC, SiriusXM - is a wordmark, so
+         putting one beside its own name reads as "plex>Plex". */
+      .lbl-vh {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        border: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
       }
       /* Move the hover arrow clear of the full-screen control instead of
          letting the two overlap. */
       .split > .main::after {
         right: 72px;
       }
+      /* The full-screen control is absolutely positioned inside the row, so
+         making it larger does not resize the URL button beside it - the button
+         keeps its full column width and the label stays centred because the
+         padding below grows on BOTH sides. */
       .split > .fs {
         position: absolute;
-        right: 14px;
+        right: 13px;
         top: 50%;
         transform: translateY(-50%);
-        width: 40px;
-        height: 40px;
+        /* 44px, not 48. The row itself is only 54px tall, so a 48px control is
+           89% of it and reads as a competing element rather than as chrome.
+           44 keeps the larger tap target without that. */
+        width: 44px;
+        height: 44px;
         padding: 0;
         display: flex;
         align-items: center;
         justify-content: center;
-        border-radius: 10px;
+        border-radius: 11px;
         border: 1px solid transparent;
         background: transparent;
         color: var(--muted);
@@ -116,8 +186,8 @@
         content: none;
       }
       .split > .fs svg {
-        width: 19px;
-        height: 19px;
+        width: 21px;
+        height: 21px;
         display: block;
       }
       /* A full-screen button needs the same shape three more times. One symbol,
@@ -158,37 +228,61 @@
 
     <div class="links">
       <div class="split">
-        <a class="main" href="https://berno22.github.io/livetv/">Live TV</a>
+        <a class="main" href="https://berno22.github.io/livetv/">
+          <span class="lg lg-live" aria-hidden="true"></span
+          ><span class="lbl-vh">Live TV</span>
+        </a>
         <a class="fs" href="https://www.youtube.com/redirect?q=https://berno22.github.io/livetv/"
            title="Live TV full screen" aria-label="Live TV full screen">
           <svg aria-hidden="true" focusable="false"><use href="#ico-fullscreen"></use></svg>
         </a>
       </div>
       <div class="split">
-        <a class="main" href="https://app.plex.tv/">Plex</a>
+        <a class="main" href="https://app.plex.tv/">
+          <span class="lg lg-plex" aria-hidden="true"></span
+          ><span class="lbl-vh">Plex</span>
+        </a>
         <a class="fs" href="https://www.youtube.com/redirect?q=https://app.plex.tv/"
            title="Plex full screen" aria-label="Plex full screen">
           <svg aria-hidden="true" focusable="false"><use href="#ico-fullscreen"></use></svg>
         </a>
       </div>
       <div class="split">
-        <a class="main" href="https://cinejoy.pk">Streaming</a>
+        <a class="main" href="https://cinejoy.pk"><span>Streaming</span></a>
         <a class="fs" href="https://www.youtube.com/redirect?q=https://cinejoy.pk"
            title="Streaming full screen" aria-label="Streaming full screen">
           <svg aria-hidden="true" focusable="false"><use href="#ico-fullscreen"></use></svg>
         </a>
       </div>
       <div class="split">
-        <a class="main" href="https://berno22.github.io/cnbc.html">CNBC</a>
+        <a class="main" href="https://berno22.github.io/cnbc.html">
+          <span class="lg lg-cnbc" aria-hidden="true"></span
+          ><span class="lbl-vh">CNBC</span>
+        </a>
         <a class="fs" href="https://www.youtube.com/redirect?q=https://berno22.github.io/cnbc.html"
            title="CNBC full screen" aria-label="CNBC full screen">
           <svg aria-hidden="true" focusable="false"><use href="#ico-fullscreen"></use></svg>
         </a>
       </div>
-      <a href="https://berno22.github.io/cnbcaudio/">CNBC Audio</a>
-      <a href="http://96.244.150.95:8787">SiriusXM</a>
+      <!-- CNBC Audio is hidden for now. Commented out rather than deleted, so
+           it is one uncomment away. Note: a double hyphen is illegal inside an
+           HTML comment and can end it early, so the markup below must not
+           contain one, and neither may this note. -->
+      <!--
+      <a class="has-logo has-logo-inline" href="https://berno22.github.io/cnbcaudio/"
+         aria-label="CNBC Audio">
+        <span class="lg lg-cnbc" aria-hidden="true"></span><span>Audio</span>
+      </a>
+      -->
+      <a class="has-logo" href="http://96.244.150.95:8787">
+        <span class="lg lg-siriusxm" aria-hidden="true"></span
+        ><span class="lbl-vh">SiriusXM</span>
+      </a>
       <a href="https://berno22.github.io/garagedoor/">Garage Door</a>
-      <a href="https://berno22.github.io/cnbcinmotion/">CNBC InMotion</a>
+      <a class="has-logo has-logo-inline" href="https://berno22.github.io/cnbcinmotion/"
+         aria-label="CNBC InMotion">
+        <span class="lg lg-cnbc" aria-hidden="true"></span><span>InMotion</span>
+      </a>
     </div>
   </body>
 </html>
