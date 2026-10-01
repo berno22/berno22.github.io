@@ -255,6 +255,11 @@
     if (cnbcGain) cnbcGain.gain.value = 1.0;
     // LoFi never pauses: always streaming so it's instantly ready.
     if (lofiEl.src && lofiEl.paused) lofiEl.play().catch(() => {});
+    // The stall watchdog rides this same heartbeat. It measures currentTime
+    // rather than waiting on a timer of its own, because in a hidden page
+    // timers are throttled to ~1Hz while this poll still runs often enough to
+    // tell a stalled stream from a slow one.
+    lofiTick();
   }
 
   const FADE_MS = 700;
@@ -400,6 +405,54 @@
   // A successful load resets the budget, so a bed that fails hours later is not
   // left with its retries already spent.
   lofiEl.addEventListener('playing', () => { lofiRetries = 0; });
+
+  // Stall recovery. 'error' only fires on a hard failure, so a bed that merely
+  // underruns (no data, no error) would otherwise sit silent into a break.
+  // This page previously had no handler for that at all, so a starved stream
+  // stayed starved until the tab was reloaded.
+  //
+  // The judgement is made by watching currentTime move, not by a timer. Timers
+  // in a hidden page are throttled to roughly 1Hz, so a blind timeout both
+  // fires late and fires at the wrong moment. A live stream that is merely
+  // starved recovers by itself when data arrives, and that recovery is
+  // seamless - which is the whole point, since restarting a live stream means
+  // discarding the buffer and re-requesting from the top, heard as a hard cut
+  // followed by a rebuffer.
+  const LOFI_STUCK_GRACE_MS = 4000; // frozen this long while paused -> nudge play()
+  const LOFI_DEAD_MS = 30000;       // frozen this long while "playing" -> re-request
+  let lofiLastCt = -1;
+  let lofiLastCtAt = 0;
+  let lofiStuckPolls = 0;
+  function lofiTick() {
+    const ct = lofiEl.currentTime;
+    const now = Date.now();
+    // Progress: reset every counter and do nothing else. This is the normal
+    // case by far, and doing nothing is the point - see above.
+    if (ct !== lofiLastCt) {
+      lofiLastCt = ct;
+      lofiLastCtAt = now;
+      lofiStuckPolls = 0;
+      return;
+    }
+    const frozenFor = now - lofiLastCtAt;
+    if (lofiEl.paused) {
+      // Paused and going nowhere. play() is cheap and non-destructive, so this
+      // is safe to repeat. Two consecutive dead polls first, so one slow sample
+      // cannot trigger it.
+      if (frozenFor < LOFI_STUCK_GRACE_MS) return;
+      if (++lofiStuckPolls < 2) return;
+      lofiStuckPolls = 0;
+      lofiLastCtAt = now;
+      try { lofiEl.play().catch(() => {}); } catch (e) {}
+      return;
+    }
+    // Playing but not advancing: starved, and it will refill by itself. Only a
+    // long dead spell justifies re-requesting.
+    if (frozenFor > LOFI_DEAD_MS) {
+      lofiLastCtAt = now;
+      lofiLoad();
+    }
+  }
 
   // Load LoFi at page start and keep it playing at the inaudible floor under
   // CNBC so it's instantly ready when a break hits. Never muted.

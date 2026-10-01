@@ -177,6 +177,11 @@
     if (cnbcGain) cnbcGain.gain.value = 1.0;
     // LoFi never pauses: always streaming so it's instantly ready.
     if (lofiEl.src && lofiEl.paused) lofiEl.play().catch(() => {});
+    // The stall watchdog rides this same heartbeat. It measures currentTime
+    // rather than waiting on a timer of its own, because in a hidden page
+    // timers are throttled to ~1Hz while this poll still runs often enough to
+    // tell a stalled stream from a slow one.
+    lofiTick();
   }
 
   const FADE_MS = 700;
@@ -322,24 +327,60 @@
   // left with its retries already spent.
   lofiEl.addEventListener('playing', () => { lofiRetries = 0; });
 
-  // Stall recovery: 'error' only fires on hard failure. If the continuous
-  // bed stalls (no data, no error) it would otherwise sit silent into a
-  // break ("stuck"). Rebuffer the same station after a short grace period;
-  // hard failures still cycle via the 'error' handler above.
-  let lofiStallTimer = null;
-  lofiEl.addEventListener('stalled', () => {
-    if (lofiStallTimer) return;
-    lofiStallTimer = setTimeout(() => {
-      lofiStallTimer = null;
-      try {
-        if (lofiEl.paused) lofiEl.play().catch(() => {});
-        else { lofiEl.load(); lofiEl.play().catch(() => {}); }
-      } catch (e) {}
-    }, 4000);
-  });
-  lofiEl.addEventListener('playing', () => {
-    if (lofiStallTimer) { clearTimeout(lofiStallTimer); lofiStallTimer = null; }
-  });
+  // Stall recovery. 'error' only fires on a hard failure, so a bed that merely
+  // underruns (no data, no error) would otherwise sit silent into a break.
+  //
+  // This used to answer an underrun with lofiEl.load() on a 4s timer. That was
+  // the worst possible response and it is audible: load() throws away whatever
+  // is buffered and re-requests a live stream from the top, so a momentary
+  // underrun became a hard cut followed by a rebuffer - the "tape tangling"
+  // heard in the background. Measured in WebKit: currentTime going 37.99 -> 0
+  // with readyState 1, i.e. the stream restarted underneath the listener.
+  // Backgrounding makes it constant, because the browser deprioritises a hidden
+  // page's media, and a radio stream that is being starved is exactly the case
+  // that must NOT be restarted.
+  //
+  // So: judge "stuck" by watching currentTime move, not by a timer. Timers in a
+  // hidden page are throttled to roughly 1Hz, so a blind timeout both fires late
+  // and fires at the wrong moment. A live stream that is merely starved recovers
+  // on its own when data arrives, and that recovery is seamless - restarting it
+  // is strictly worse than waiting.
+  const LOFI_STUCK_GRACE_MS = 4000; // frozen this long while paused -> nudge play()
+  const LOFI_DEAD_MS = 30000;       // frozen this long while "playing" -> re-request
+  let lofiLastCt = -1;
+  let lofiLastCtAt = 0;
+  let lofiStuckPolls = 0;
+  function lofiTick() {
+    const ct = lofiEl.currentTime;
+    const now = Date.now();
+    // Progress: reset every counter and do nothing else. This is the normal
+    // case by far, and doing nothing is the point - see above.
+    if (ct !== lofiLastCt) {
+      lofiLastCt = ct;
+      lofiLastCtAt = now;
+      lofiStuckPolls = 0;
+      return;
+    }
+    const frozenFor = now - lofiLastCtAt;
+    if (lofiEl.paused) {
+      // Paused and going nowhere. play() is cheap and non-destructive, so this
+      // is safe to repeat. Two consecutive dead polls first, so one slow sample
+      // cannot trigger it.
+      if (frozenFor < LOFI_STUCK_GRACE_MS) return;
+      if (++lofiStuckPolls < 2) return;
+      lofiStuckPolls = 0;
+      lofiLastCtAt = now;
+      try { lofiEl.play().catch(() => {}); } catch (e) {}
+      return;
+    }
+    // Playing but not advancing: starved, and it will refill by itself. Only a
+    // long dead spell justifies re-requesting, and that is the sole remaining
+    // use of lofiLoad() here - rare enough not to be heard in normal use.
+    if (frozenFor > LOFI_DEAD_MS) {
+      lofiLastCtAt = now;
+      lofiLoad();
+    }
+  }
 
   // Load LoFi at page start and keep it playing at the above-mute floor
   // under CNBC so it's instantly ready when a break hits. Never muted.
