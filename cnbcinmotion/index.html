@@ -98,18 +98,6 @@
 </div>
 <script>
   const video = document.getElementById('video');
-  // LoFi level discriminator: Real Safari (WebKit bug - no Web Audio routing
-  // for HLS, element volume only) gets 40%. Everything else - desktop Chrome,
-  // Tesla Chromium, Firefox - runs the bed at full element volume. Tesla
-  // Chromium also reports native HLS, so we must NOT key off
-  // canPlayType('mpegurl') here.
-  // The bed cannot go through the 8x boost graph below: its radio servers omit
-  // CORS headers, and Chrome outputs silence for non-CORS-clean media in
-  // createMediaElementSource. So 1.0 here is the loudest it can get, and it is
-  // still ~8x quieter than CNBC during a break.
-  const ua = navigator.userAgent;
-  const isRealSafari = /Safari/.test(ua) && !/Chrome|Chromium|CriOS|Edg|OPR|\bFirefox\b/.test(ua);
-  const nativeHls = !!(video.canPlayType && video.canPlayType('application/vnd.apple.mpegurl'));
   const overlay = document.getElementById('overlay');
   const errBox = document.getElementById('err');
   const adctl = document.getElementById('adctl');
@@ -223,6 +211,15 @@
   const CNBC_LOW = 0.0000001; // 0.00001%: floor above true mute, inaudible
   function cnbcLow() { return CNBC_LOW; }
   const LOFI_LOW = 0.000001; // floor above true mute when not prominent, like CNBC
+  // The bed's level while prominent. One value for every browser: the old
+  // isRealSafari UA sniff used to drop this to 0.4 on Safari, on the theory
+  // that Safari cannot route HLS through Web Audio and so is unboosted. That
+  // is now removed - one level everywhere, which is what the car browser
+  // (Chromium) always used anyway.
+  // 1.0 is the ceiling. Element volume above 1.0 does not clamp, it THROWS
+  // IndexSizeError in both Chromium and WebKit, so anything louder has to come
+  // from a gain node in the graph above. The bed is not routed there.
+  const LOFI_HIGH = 1.0;
   let savedSlider = null; // user's volume slider, restored after a break
 
   function applyAudioLevels() {
@@ -240,9 +237,8 @@
 
     // LoFi target: prominent only during a lofi break; otherwise the
     // above-mute floor (never 0, never muted) so it's instantly ready.
-    const lofiLevel = isRealSafari ? 0.4 : 1.0;
     const lofiProminent = !!(adBreak && breakMode === 'lofi');
-    const lofiTarget = lofiProminent ? lofiLevel : LOFI_LOW;
+    const lofiTarget = lofiProminent ? LOFI_HIGH : LOFI_LOW;
 
     // Fade toward the targets (skips re-fading when targets are unchanged, since
     // applyAudioLevels runs continuously on the break-poll interval).
@@ -290,7 +286,6 @@
   let boostActivated = false;
   let boostCtx = null;
   let cnbcGain = null;
-  let lofiGain = null;
   function enableBoost() {
     if (!AudioCtor) return false;
     try {
@@ -305,9 +300,14 @@
       limiter.attack.value = 0.003; limiter.release.value = 0.25;
       media.connect(cnbcGain); cnbcGain.connect(gain);
       gain.connect(limiter); limiter.connect(ctx.destination);
-      // LoFi is deliberately NOT routed through the graph: its radio servers
-      // omit CORS headers, and Chrome outputs silence for non-CORS-clean media
-      // in createMediaElementSource. It stays a plain element-volume element.
+      // LoFi is deliberately NOT routed through the graph. The original reason
+      // given here - that the radio servers omit CORS headers - was wrong: usa9
+      // serves Access-Control-Allow-Origin: * and the <audio> is already marked
+      // crossorigin="anonymous". Measured in Chromium, the bed routed through
+      // the graph does produce signal. But WebKit yields silence through
+      // createMediaElementSource even for that same CORS-clean stream, so
+      // routing it would mute the bed on Safari. It stays a plain
+      // element-volume element, which is what caps it at 1.0.
       boostCtx = ctx;
       boostActivated = true;
       return true;
