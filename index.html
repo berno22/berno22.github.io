@@ -210,6 +210,34 @@
       .split > .fs:active {
         transform: translateY(-50%) scale(0.94);
       }
+      /* Two destinations that belong on one line, as two buttons rather than one
+         button with a corner control. Splitting a single button in half reads as
+         "two views of the same thing" - which is what the full-screen corner
+         means - and WMG is not a view of Garage Door, it is somewhere else. */
+      .pair {
+        display: flex;
+        gap: 12px;
+      }
+      .pair > a {
+        /* Equal halves, so the row reads as a deliberate pair rather than as one
+           wide button with a small thing leaning on it. min-width:0 lets the
+           text ellipsis instead of forcing the row wider than the column. */
+        flex: 1 1 0;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        /* The 44px side padding the full-width rows carry exists to clear the
+           hover arrow and, on split rows, the corner control. At half width that
+           padding would eat most of the button. */
+        padding: 17px 16px;
+      }
+      /* No hover arrow here. At half width it would sit under the label rather
+         than in the margin beside it, and there is no corner control for it to
+         dodge - so there is nothing for it to clear. */
+      .pair > a::after {
+        content: none;
+      }
       @media (max-width: 480px) {
         a { font-size: 16px; }
       }
@@ -264,6 +292,14 @@
           <svg aria-hidden="true" focusable="false"><use href="#ico-fullscreen"></use></svg>
         </a>
       </div>
+      <!-- CNBC InMotion sits directly under CNBC rather than at the bottom of the
+           list. Both are the same brand, and they were only separated by four
+           unrelated rows, so the two halves of one thing read as two separate
+           destinations. -->
+      <a class="has-logo has-logo-inline" href="https://berno22.github.io/cnbcinmotion/"
+         aria-label="CNBC InMotion">
+        <span class="lg lg-cnbc" aria-hidden="true"></span><span>InMotion</span>
+      </a>
       <!-- CNBC Audio is hidden for now. Commented out rather than deleted, so
            it is one uncomment away. Note: a double hyphen is illegal inside an
            HTML comment and can end it early, so the markup below must not
@@ -278,11 +314,14 @@
         <span class="lg lg-siriusxm" aria-hidden="true"></span
         ><span class="lbl-vh">SiriusXM</span>
       </a>
-      <a href="https://berno22.github.io/garagedoor/">Garage Door</a>
-      <a class="has-logo has-logo-inline" href="https://berno22.github.io/cnbcinmotion/"
-         aria-label="CNBC InMotion">
-        <span class="lg lg-cnbc" aria-hidden="true"></span><span>InMotion</span>
-      </a>
+      <!-- Garage Door and WMG share a line as two buttons of their own. Neither is a
+           view of the other, so neither is drawn as half of one button: a split
+           button says "same thing, different view", and that is not what these
+           two are. -->
+      <div class="pair">
+        <a href="https://berno22.github.io/garagedoor/">Garage Door</a>
+        <a href="https://8574e2add79ef606.vpmbd45g3cfj.opentunnel.xyz">WMG</a>
+      </div>
     </div>
   </body>
 </html>
