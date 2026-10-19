@@ -151,17 +151,34 @@ input:focus-visible {
 
 .search input::-webkit-search-cancel-button {
   -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
-  margin: 0 6px 0 0;
-  background-color: #9a9a9a;
-  -webkit-mask: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m6 6 12 12M18 6 6 18' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
-  mask: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m6 6 12 12M18 6 6 18' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  appearance: none;
+  display: none;
+}
+
+.search-clear {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #9a9a9a;
   cursor: pointer;
 }
 
-.search input::-webkit-search-cancel-button:hover {
-  background-color: #777777;
+.search-clear[hidden] {
+  display: none;
+}
+
+.search-clear svg {
+  width: 20px;
+  height: 20px;
+}
+
+.search-clear:hover {
+  color: #777777;
 }
 
 .search-submit {

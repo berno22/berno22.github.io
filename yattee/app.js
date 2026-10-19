@@ -9,6 +9,7 @@
     settingsBtn: document.getElementById('settingsBtn'),
     searchForm: document.getElementById('searchForm'),
     searchInput: document.getElementById('searchInput'),
+    searchClear: document.getElementById('searchClear'),
     browseView: document.getElementById('browseView'),
     browseKicker: document.getElementById('browseKicker'),
     browseTitle: document.getElementById('browseTitle'),
@@ -751,6 +752,7 @@
     els.moreBtn.hidden = true;
     els.emptyState.hidden = true;
     els.searchInput.value = '';
+    updateSearchClear();
     setBrowseHeader('', 'Trending');
     setNotice('');
     renderSkeletons();
@@ -804,6 +806,7 @@
     state.results = [];
     state.loadingMore = false;
     els.searchInput.value = query;
+    updateSearchClear();
     els.emptyState.hidden = true;
     els.moreBtn.hidden = true;
     setBrowseHeader('Search', 'Results');
@@ -1793,6 +1796,10 @@
     }
   }
 
+  function updateSearchClear() {
+    els.searchClear.hidden = !els.searchInput.value;
+  }
+
   function bindEvents() {
     els.homeBtn.addEventListener('click', handleHome);
     els.settingsBtn.addEventListener('click', () => openSettings());
@@ -1801,6 +1808,13 @@
     els.settingsForm.addEventListener('submit', submitSettings);
     els.clearBtn.addEventListener('click', clearCredentials);
     els.searchForm.addEventListener('submit', handleSearchSubmit);
+    els.searchClear.addEventListener('click', () => {
+      els.searchInput.value = '';
+      updateSearchClear();
+      els.searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      els.searchInput.focus();
+    });
+    els.searchInput.addEventListener('input', updateSearchClear);
     els.resultsGrid.addEventListener('click', handleResultsClick);
     els.moreBtn.addEventListener('click', loadMoreResults);
     els.backBtn.addEventListener('click', leaveWatch);

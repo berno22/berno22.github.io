@@ -20,6 +20,11 @@
       <label class="sr-only" for="searchInput">Search videos or paste a video URL</label>
       <input id="searchInput" name="q" type="search" inputmode="search" autocomplete="off"
              spellcheck="false" placeholder="Search or paste a video URL">
+      <button class="search-clear" id="searchClear" type="button" aria-label="Clear search" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="m6.5 6.5 11 11M17.5 6.5l-11 11" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/>
+        </svg>
+      </button>
       <button class="search-submit" type="submit" aria-label="Search">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/>
