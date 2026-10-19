@@ -90,6 +90,9 @@
     stallStartAt: 0,
     restartCount: 0,
     restartAt: 0,
+    restartTimer: 0,
+    restartDrawn: -1,
+    restartPosition: 0,
     toastTimer: 0,
     settingsReturnFocus: null
   };
@@ -424,7 +427,7 @@
   // that is simply broken from restarting forever.
   const STALL_MS = 7000;
   const START_STALL_MS = 25000;
-  const MAX_AUTO_RESTARTS = 3;
+  const MAX_AUTO_RESTARTS = 5;
   const RESTART_BUDGET_RESET_MS = 120000;
 
   function watchForStall(snapshot) {
@@ -454,31 +457,116 @@
     autoRestart('Stream stalled, reconnecting...');
   }
 
+  function cancelReconnect() {
+    if (state.restartTimer) {
+      clearTimeout(state.restartTimer);
+      state.restartTimer = 0;
+    }
+  }
+
   function autoRestart(message) {
     if (state.mode !== 'engine' || state.engineFailed || !state.engine || !state.engineSource || !state.streamUrl) return;
+    if (state.restartTimer) return;
     if (state.restartCount >= MAX_AUTO_RESTARTS) {
       engineFailed('The stream keeps stalling. Try another video.');
       return;
     }
     state.restartCount += 1;
     state.restartAt = Date.now();
+    let drawn = -1;
+    try {
+      const snapshot = state.engine.state();
+      if (snapshot) drawn = snapshot.drawn || 0;
+    } catch (err) {}
+    state.restartDrawn = drawn;
+    state.restartPosition = state.timelinePosition || 0;
     state.stallDrawn = -1;
     state.stallDrawnAt = Date.now();
     state.stallStartAt = 0;
     showLoading(message || 'Reconnecting...');
+    // Give the edge a moment to cool down instead of immediately hammering it
+    // with the same signed URL. The delay grows but stays short enough that a
+    // transient outage still feels like a hiccup.
+    const delay = Math.min(1500 * Math.pow(2, state.restartCount - 1), 8000);
+    state.restartTimer = setTimeout(() => {
+      state.restartTimer = 0;
+      restartStream();
+    }, delay);
+  }
+
+  async function restartStream() {
+    if (state.mode !== 'engine' || state.engineFailed || !state.engine || !state.engineSource) return;
+    const token = state.playToken;
+
+    // If the picture came back while we were waiting, don't reopen at all.
+    try {
+      const snapshot = state.engine.state();
+      if (snapshot && snapshot.stage && snapshot.stage !== 'starting' && snapshot.stage !== 'error' &&
+          (snapshot.drawn || 0) > state.restartDrawn && (snapshot.drawn || 0) > 0) {
+        hideOverlay();
+        return;
+      }
+    } catch (err) {}
+
+    let source = state.engineSource;
+    let url = state.streamUrl;
+    const id = (state.current && state.current.videoId) || state.currentId || '';
+    if (id) {
+      const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = ctl ? setTimeout(() => { try { ctl.abort(); } catch (err) {} }, 20000) : 0;
+      try {
+        const data = await api(
+          '/api/v1/videos/' + encodeURIComponent(id) + '?proxy=true&proxy_mode=relay',
+          ctl ? { signal: ctl.signal } : {}
+        );
+        if (token !== state.playToken) return;
+        const fresh = chooseEngineSource(data);
+        if (fresh) {
+          source = fresh;
+          url = fresh.url;
+          state.current = data;
+          state.engineSource = fresh;
+          state.streamUrl = url;
+          state.timelineDuration = fresh.vod ? (Number(data.lengthSeconds) || 0) : 0;
+          els.watchTitle.textContent = data.title || els.watchTitle.textContent;
+          renderWatchMeta(data.author || '', authorAvatarUrl(data), itemMetaBits(data));
+          document.title = (data.title || 'Video') + ' - YouTube';
+        }
+      } catch (err) {
+        if (token !== state.playToken) return;
+        if (err instanceof AuthError) {
+          engineFailed(err.message);
+          return;
+        }
+        // Fall back to the URL we had; a fresh one is preferable but not
+        // required if the API itself is briefly unavailable.
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+    if (token !== state.playToken || state.mode !== 'engine' || state.engineFailed || !state.engine) return;
+
+    let startSec = 0;
+    if (source.vod && source.kind === 'mp4') {
+      const duration = state.timelineDuration || 0;
+      startSec = Math.max(0, (state.restartPosition || 0) - 0.5);
+      if (duration > 4) startSec = Math.min(startSec, duration - 3);
+      if (startSec < 1) startSec = 0;
+    }
     try {
       state.engine.setMuted(state.muted);
       state.engine.setRepeat(state.repeat);
-      state.engine.open(state.streamUrl, {
+      state.engine.open(url, {
         name: (state.current && state.current.title) || '',
-        type: state.engineSource.kind,
-        vod: state.engineSource.vod,
-        maxHeight: state.engineSource.maxHeight || 1080,
-        pickedHeight: state.engineSource.height || 0,
-        audioUrl: state.engineSource.audioUrl || '',
-        durationHint: state.engineSource.vod && state.current
+        type: source.kind,
+        vod: source.vod,
+        maxHeight: source.maxHeight || 1080,
+        pickedHeight: source.height || 0,
+        audioUrl: source.audioUrl || '',
+        durationHint: source.vod && state.current
           ? (Number(state.current.lengthSeconds) || 0)
-          : 0
+          : 0,
+        startSec
       });
     } catch (err) {
       engineFailed(err.message || 'Tesla Engine could not play this stream.');
@@ -895,6 +983,9 @@
     state.stallStartAt = 0;
     state.restartCount = 0;
     state.restartAt = 0;
+    state.restartDrawn = -1;
+    state.restartPosition = 0;
+    cancelReconnect();
     if (state.engine) {
       try { state.engine.setPaused(false); } catch (err) {}
     }
@@ -1263,6 +1354,7 @@
 
   function engineFailed(message) {
     if (state.mode !== 'engine' || state.engineFailed) return;
+    cancelReconnect();
     state.engineFailed = true;
     state.mode = 'error';
     if (state.engine) {
@@ -1274,6 +1366,7 @@
   }
 
   function stopPlayer() {
+    cancelReconnect();
     state.mode = null;
     state.engineFailed = false;
     state.engineSource = null;
@@ -1393,18 +1486,26 @@
   }
 
   function updateTimeline(snapshot) {
-    if (!snapshot || els.timeline.hidden) return;
+    if (!snapshot) return;
     if (snapshot.stage === 'idle') return;
     updatePlayButton(snapshot.paused);
-    if (!snapshot.vod) {
+    // Track the position even while the bar is auto-hidden: reconnect uses
+    // it to resume VOD at the point where the stream died, and the bar is
+    // invisible for most of playback.
+    const vod = !!snapshot.vod;
+    if (vod) {
+      state.timelineSeekable = snapshot.seekable !== false;
+      state.timelinePosition = snapshot.position || 0;
+      const duration = snapshot.duration || state.timelineDuration || 0;
+      if (duration > 0) state.timelineDuration = duration;
+    } else {
       state.timelineSeekable = false;
+    }
+    if (els.timeline.hidden) return;
+    if (!vod) {
       setTimelineLive(true);
       return;
     }
-    state.timelineSeekable = snapshot.seekable !== false;
-    state.timelinePosition = snapshot.position || 0;
-    const duration = snapshot.duration || state.timelineDuration || 0;
-    if (duration > 0) state.timelineDuration = duration;
     setTimelineLive(false);
     if (state.timelineDragging) {
       setTimelineFill(state.timelinePreview || 0, state.timelineDuration);
