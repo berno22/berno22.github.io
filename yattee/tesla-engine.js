@@ -426,6 +426,7 @@
       // joining live, aDepth is the smoothed ring depth the trim is computed
       // from, and aTrim is the correction last sent to the ring.
       aPrimed: !!((meta && meta.vod)), aDepth: 0, aTrim: 1, lastTrimAt: 0,
+      aFirstRel: null,
       codec: '-', width: 0, height: 0, srcRate: 0,
       decFps: 0, paintFps: 0, lastDecT: 0, lastPaintT: 0,
       gaps: [], lastGapAt: 0, buffered: 0
@@ -1833,6 +1834,20 @@
       // slightly different segment boundaries.
       var aOff = s.vT0 - (s.vBaseSec >= 0 ? s.vBaseSec : 0) * 1000;
       var aDue = function (x) { return aOff + x.ts / 1000; };
+      // A VOD seek resumes the picture at a video keyframe and the sound at its
+      // own subsegment boundary; those are not aligned. Audio subsegments are
+      // ~10s and video ones ~3-7s, so the audio pre-roll can start seconds
+      // before the first video frame. Those samples are stale: feeding even
+      // the last 500ms of them (the late-drop window below) adds wall time the
+      // ring never gives back, so the sound stays behind the picture for the
+      // rest of the stream while the ring depth reads exactly right - the trim
+      // loop only sees clock drift, not this offset. Cut strictly at the anchor
+      // and keep cutting while the demuxer works through the pre-roll. The
+      // first kept frame can only be one AAC frame (23ms) late.
+      if (s.vBaseSec >= 0) {
+        var aCut = s.vBaseSec;
+        while (s.aPend.length && s.aPend[0].ts / 1e6 < aCut) { s.aPend.shift(); s.aSkips++; }
+      }
       // The first release of a stream drops what is already due. Joining live
       // means the head of the queue is in the past, and playing it would start
       // the ring deeper than the lead - the exact offset this is here to avoid.
@@ -1844,6 +1859,7 @@
       while (s.aPend.length && aDue(s.aPend[0]) - now < AUDIO_LEAD_MS) {
         if (s.adec.decodeQueueSize > 40) break;
         var a = s.aPend.shift();
+        if (s.aFirstRel === null) s.aFirstRel = a.ts / 1e6 - (s.vBaseSec >= 0 ? s.vBaseSec : 0);
         try {
           s.adec.decode(new EncodedAudioChunk({ type: a.sync ? 'key' : 'delta', timestamp: a.ts - (s.vBaseSec >= 0 ? s.vBaseSec : 0) * 1e6, data: a.raw }));
         } catch (e) {}
@@ -2172,6 +2188,7 @@
       drawn: s.drawn, drops: s.drops, segs: s.segsFetched,
       dropsLate: s.dropsLate, dropsQ: s.dropsQ, dropsPre: s.dropsPre, dropsFq: s.dropsFq,
       aSkips: s.aSkips,
+      aFirstRel: s.aFirstRel,
       audioPath: this.audio.path, modErr: this.audio.modErr,
       muted: this.muted,
       ctxState: this.actx ? this.actx.state : 'none',
