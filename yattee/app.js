@@ -546,6 +546,7 @@
     }
     if (token !== state.playToken || state.mode !== 'engine' || state.engineFailed || !state.engine) return;
 
+    const wasPaused = !!state.timelinePaused;
     let startSec = 0;
     if (source.vod && source.kind === 'mp4') {
       const duration = state.timelineDuration || 0;
@@ -568,6 +569,10 @@
           : 0,
         startSec
       });
+      if (wasPaused) {
+        try { state.engine.setPaused(true); } catch (err) {}
+        updatePlayButton(true);
+      }
     } catch (err) {
       engineFailed(err.message || 'Tesla Engine could not play this stream.');
     }
