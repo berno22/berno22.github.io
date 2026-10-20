@@ -2168,6 +2168,10 @@
     if (s.vod) {
       var elapsed = s.vT0 >= 0 ? (clockNow(s) - s.vT0) / 1000 : 0;
       position = Math.max(0, s.playStartSec + elapsed);
+      // While the pipeline re-opens after a seek there is no media clock yet,
+      // so the position would read 0 and the next seek would jump backwards.
+      // Report the requested position until the new pipeline has its own.
+      if (s.vT0 < 0 && s.startSec > 0) position = s.startSec;
       if (s.duration > 0) position = Math.min(position, s.duration);
     }
     var st = {

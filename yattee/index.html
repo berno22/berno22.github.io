@@ -8,7 +8,7 @@
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob:; style-src 'self'; img-src 'self' data: https: http:; media-src 'self' blob: https: http:; connect-src 'self' https: http:; worker-src 'self' blob:; form-action 'self'; base-uri 'none'">
   <title>YouTube</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20261021f">
 </head>
 <body>
   <header class="appbar">
@@ -33,21 +33,44 @@
       </button>
     </form>
 
-    <button class="icon-button" id="settingsBtn" type="button" aria-label="Settings" title="Settings">
-      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-    </button>
+    <div class="appbar-actions">
+      <button class="icon-button" id="bookmarksBtn" type="button" aria-label="Bookmarks" title="Bookmarks">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M6.5 3.8h11c.6 0 1 .4 1 1v15.6l-6.5-3.9-6.5 3.9V4.8c0-.6.4-1 1-1Z" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
+      <button class="icon-button" id="settingsBtn" type="button" aria-label="Settings" title="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <defs>
+            <mask id="settings-hole">
+              <rect width="24" height="24" fill="#ffffff"/>
+              <circle cx="12" cy="12" r="2.6" fill="#000000"/>
+            </mask>
+          </defs>
+          <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58z" fill="currentColor" mask="url(#settings-hole)"/>
+        </svg>
+      </button>
+    </div>
   </header>
 
   <main class="view browse" id="browseView">
-    <div class="browse-head">
-      <div>
-        <p class="eyebrow" id="browseKicker">Yattee</p>
-        <h1 id="browseTitle">Trending</h1>
+    <section class="shelf" id="bookmarksShelf" aria-label="Bookmarks" hidden>
+      <div class="shelf-head">
+        <p class="eyebrow">Saved</p>
+        <div class="shelf-title-row">
+          <h2>Bookmarks</h2>
+          <span class="count" id="bookmarksShelfCount"></span>
+        </div>
       </div>
-      <span class="count" id="browseCount"></span>
+      <div class="shelf-row" id="bookmarksShelfRow"></div>
+    </section>
+
+    <div class="browse-head">
+      <p class="eyebrow" id="browseKicker">YouTube</p>
+      <div class="browse-title-row">
+        <h1 id="browseTitle">Trending</h1>
+        <span class="count" id="browseCount"></span>
+      </div>
     </div>
 
     <p class="notice" id="browseStatus" role="status" hidden></p>
@@ -71,6 +94,11 @@
       <button class="back-button" id="backBtn" type="button" aria-label="Back">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="m15 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <button class="text-button" id="bookmarkBtn" type="button" aria-label="Save to bookmarks" title="Save to bookmarks" aria-pressed="false" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M6.5 3.8h11c.6 0 1 .4 1 1v15.6l-6.5-3.9-6.5 3.9V4.8c0-.6.4-1 1-1Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
         </svg>
       </button>
       <button class="text-button" id="refreshBtn" type="button" aria-label="Refresh" title="Refresh" hidden>
@@ -127,6 +155,18 @@
         <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="M8.2 6.1v11.8L18.4 12z" fill="currentColor" stroke="none"/>
         </svg>
+      </button>
+      <button class="stage-skip stage-skip-back" id="skipBackBtn" type="button" aria-label="Back 10 seconds" title="Back 10 seconds">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 4.6V1.8L7.7 5.5 12 9.1V6.3a5.7 5.7 0 1 1-5.7 5.7H4.1A7.9 7.9 0 1 0 12 4.6Z" fill="currentColor"/>
+        </svg>
+        <span>10s</span>
+      </button>
+      <button class="stage-skip stage-skip-fwd" id="skipFwdBtn" type="button" aria-label="Forward 10 seconds" title="Forward 10 seconds">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 4.6V1.8L7.7 5.5 12 9.1V6.3a5.7 5.7 0 1 1-5.7 5.7H4.1A7.9 7.9 0 1 0 12 4.6Z" fill="currentColor"/>
+        </svg>
+        <span>10s</span>
       </button>
     </div>
 
@@ -188,11 +228,30 @@
     </form>
   </section>
 
+  <section class="modal confirm-modal" id="bookmarkConfirm" role="dialog" aria-modal="true" aria-labelledby="bookmarkConfirmTitle" hidden>
+    <div class="modal-head">
+      <div>
+        <p class="eyebrow">Bookmarks</p>
+        <h2 id="bookmarkConfirmTitle">Remove bookmark?</h2>
+      </div>
+      <button class="icon-button close-button" id="closeBookmarkConfirmBtn" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+    <p class="confirm-text" id="bookmarkConfirmText"></p>
+    <div class="modal-actions">
+      <button class="primary" id="confirmRemoveBookmarkBtn" type="button">Remove</button>
+      <button class="ghost" id="cancelRemoveBookmarkBtn" type="button">Cancel</button>
+    </div>
+  </section>
+
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="vendor/mux.min.js" defer></script>
   <script src="vendor/mp4box.all.min.js" defer></script>
-  <script src="tesla-engine.js?v=20261019a" defer></script>
-  <script src="app.js?v=20261019c" defer></script>
+  <script src="tesla-engine.js?v=20261021a" defer></script>
+  <script src="app.js?v=20261020x" defer></script>
 </body>
 </html>

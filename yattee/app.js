@@ -2,10 +2,17 @@
 
 (() => {
   const STORAGE_KEY = 'yattee-tesla.connection.v1';
+  const BOOKMARK_KEY = 'yattee-tesla.bookmarks.v1';
+  const BOOKMARK_CACHE_PREFIX = 'yattee-tesla.bookmarks.v2:';
+  const BOOKMARK_LIMIT = 100;
   const DEFAULT_SERVER = 'https://yattee.vpmbd45g3cfj.opentunnel.xyz';
 
   const els = {
     homeBtn: document.getElementById('homeBtn'),
+    bookmarksBtn: document.getElementById('bookmarksBtn'),
+    bookmarksShelf: document.getElementById('bookmarksShelf'),
+    bookmarksShelfCount: document.getElementById('bookmarksShelfCount'),
+    bookmarksShelfRow: document.getElementById('bookmarksShelfRow'),
     settingsBtn: document.getElementById('settingsBtn'),
     searchForm: document.getElementById('searchForm'),
     searchInput: document.getElementById('searchInput'),
@@ -21,6 +28,7 @@
     emptyConnectBtn: document.getElementById('emptyConnectBtn'),
     watchView: document.getElementById('watchView'),
     backBtn: document.getElementById('backBtn'),
+    bookmarkBtn: document.getElementById('bookmarkBtn'),
     refreshBtn: document.getElementById('refreshBtn'),
     muteBtn: document.getElementById('muteBtn'),
     repeatBtn: document.getElementById('repeatBtn'),
@@ -36,6 +44,8 @@
     timelineLive: document.getElementById('timelineLive'),
     timelineCurrent: document.getElementById('timelineCurrent'),
     timelinePlayBtn: document.getElementById('timelinePlayBtn'),
+    skipBackBtn: document.getElementById('skipBackBtn'),
+    skipFwdBtn: document.getElementById('skipFwdBtn'),
     timelineDuration: document.getElementById('timelineDuration'),
     watchTitle: document.getElementById('watchTitle'),
     watchMeta: document.getElementById('watchMeta'),
@@ -52,6 +62,11 @@
     connectBtn: document.getElementById('connectBtn'),
     clearBtn: document.getElementById('clearBtn'),
     closeSettingsBtn: document.getElementById('closeSettingsBtn'),
+    bookmarkConfirm: document.getElementById('bookmarkConfirm'),
+    bookmarkConfirmText: document.getElementById('bookmarkConfirmText'),
+    confirmRemoveBookmarkBtn: document.getElementById('confirmRemoveBookmarkBtn'),
+    cancelRemoveBookmarkBtn: document.getElementById('cancelRemoveBookmarkBtn'),
+    closeBookmarkConfirmBtn: document.getElementById('closeBookmarkConfirmBtn'),
     toast: document.getElementById('toast')
   };
 
@@ -78,6 +93,7 @@
     loadingMore: false,
     engineSource: null,
     timelineHideTimer: 0,
+    timelineLastTap: 0,
     timelineDragging: false,
     timelinePreview: null,
     timelinePreviewAt: 0,
@@ -93,6 +109,7 @@
     restartTimer: 0,
     restartDrawn: -1,
     restartPosition: 0,
+    bookmarkRevision: 0,
     toastTimer: 0,
     settingsReturnFocus: null
   };
@@ -150,15 +167,21 @@
     const authorization = authHeader();
     if (authorization) headers.Authorization = authorization;
 
+    const request = {
+      method: options.method || 'GET',
+      headers,
+      cache: 'no-store',
+      mode: 'cors',
+      signal: options.signal
+    };
+    if (options.body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      request.body = options.body;
+    }
+
     let response;
     try {
-      response = await fetch(state.creds.base + path, {
-        method: 'GET',
-        headers,
-        cache: 'no-store',
-        mode: 'cors',
-        signal: options.signal
-      });
+      response = await fetch(state.creds.base + path, request);
     } catch (err) {
       if (err && err.name === 'AbortError') throw err;
       throw new RequestError(networkHelp(), 'network');
@@ -312,6 +335,102 @@
     }
   }
 
+  // Bookmarks are stored on the connected Yattee server, one list per user.
+  // localStorage is only a cache scoped to that server + username, so
+  // switching servers never shows another server's saved videos.
+  function bookmarkCacheKey() {
+    const creds = state.creds;
+    if (!creds || !creds.base) return '';
+    return BOOKMARK_CACHE_PREFIX + creds.base + ':' + (creds.username || '');
+  }
+
+  function bookmarkDirtyKey() {
+    const key = bookmarkCacheKey();
+    return key ? key + ':dirty' : '';
+  }
+
+  function readBookmarks() {
+    const key = bookmarkCacheKey();
+    if (!key) return [];
+    let raw = null;
+    try {
+      raw = localStorage.getItem(key);
+      if (raw == null) {
+        // A list from the local-only build follows the first server this
+        // profile connects to; the dirty flag uploads it on the next sync.
+        const legacy = localStorage.getItem(BOOKMARK_KEY);
+        if (legacy != null) {
+          localStorage.setItem(key, legacy);
+          localStorage.removeItem(BOOKMARK_KEY);
+          localStorage.setItem(key + ':dirty', '1');
+          raw = legacy;
+        }
+      }
+    } catch (err) {
+      return [];
+    }
+    if (!raw) return [];
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      return [];
+    }
+    if (!Array.isArray(parsed)) return [];
+    const seen = new Set();
+    const items = [];
+    for (const entry of parsed) {
+      if (!entry || typeof entry.videoId !== 'string' || !entry.videoId) continue;
+      if (seen.has(entry.videoId)) continue;
+      seen.add(entry.videoId);
+      items.push(entry);
+    }
+    return items;
+  }
+
+  function writeBookmarks(items) {
+    const key = bookmarkCacheKey();
+    if (!key) return false;
+    try {
+      localStorage.setItem(key, JSON.stringify(items.slice(0, BOOKMARK_LIMIT)));
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function bookmarksAreDirty() {
+    const key = bookmarkDirtyKey();
+    if (!key) return false;
+    try {
+      return localStorage.getItem(key) === '1';
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function markBookmarksDirty(dirty) {
+    const key = bookmarkDirtyKey();
+    if (!key) return;
+    try {
+      if (dirty) localStorage.setItem(key, '1');
+      else localStorage.removeItem(key);
+    } catch (err) {}
+  }
+
+  function currentVideoId() {
+    const data = state.current;
+    if (data) {
+      if (typeof data.videoId === 'string' && data.videoId) return data.videoId;
+      if (typeof data.video_id === 'string' && data.video_id) return data.video_id;
+    }
+    return state.currentId || '';
+  }
+
+  function bookmarkedItem(id) {
+    if (!id) return null;
+    return readBookmarks().find((entry) => entry.videoId === id) || null;
+  }
   function engineIsReady() {
     if (!window.TeslaEngine || !window.TeslaPlayer) return false;
     if (!window.isSecureContext) return false;
@@ -384,7 +503,7 @@
     state.engine.on('fail', (message) => {
       if (state.mode !== 'engine') return;
       if (state.restartCount < MAX_AUTO_RESTARTS) {
-        autoRestart('Stream interrupted. Reconnecting...');
+        autoRestart('Still loading...');
       } else {
         engineFailed(message);
       }
@@ -483,7 +602,7 @@
     state.stallDrawn = -1;
     state.stallDrawnAt = Date.now();
     state.stallStartAt = 0;
-    showLoading(message || 'Reconnecting...');
+    showLoading(message || 'Still loading...');
     // Give the edge a moment to cool down instead of immediately hammering it
     // with the same signed URL. The delay grows but stays short enough that a
     // transient outage still feels like a hiccup.
@@ -758,56 +877,116 @@
     els.browseCount.textContent = '';
   }
 
+  function savedVideoIds() {
+    const ids = new Set();
+    for (const entry of readBookmarks()) ids.add(entry.videoId);
+    return ids;
+  }
+
+  function buildVideoCard(item, savedIds) {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'video-card';
+    card.dataset.videoId = item.videoId;
+    if (savedIds && savedIds.has(item.videoId)) card.classList.add('saved');
+
+    const thumb = document.createElement('div');
+    thumb.className = 'thumb';
+    const thumbUrl = thumbnailUrl(item);
+    if (thumbUrl) {
+      const img = document.createElement('img');
+      img.src = thumbUrl;
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.draggable = false;
+      img.referrerPolicy = 'no-referrer';
+      img.addEventListener('error', () => img.classList.add('is-broken'), { once: true });
+      thumb.append(img);
+    }
+
+    if (item.liveNow) {
+      const live = document.createElement('span');
+      live.className = 'live-pill';
+      live.textContent = 'Live';
+      thumb.append(live);
+    } else {
+      const duration = formatDuration(item.lengthSeconds);
+      if (duration) {
+        const badge = document.createElement('span');
+        badge.className = 'duration';
+        badge.textContent = duration;
+        thumb.append(badge);
+      }
+    }
+
+    const holdBar = document.createElement('span');
+    holdBar.className = 'hold-bar';
+    thumb.append(holdBar);
+
+    const savedBadge = document.createElement('span');
+    savedBadge.className = 'saved-badge';
+    savedBadge.setAttribute('aria-hidden', 'true');
+    const savedSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    savedSvg.setAttribute('viewBox', '0 0 24 24');
+    savedSvg.setAttribute('focusable', 'false');
+    const savedPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    savedPath.setAttribute('d', 'M6.5 3.8h11c.6 0 1 .4 1 1v15.6l-6.5-3.9-6.5 3.9V4.8c0-.6.4-1 1-1Z');
+    savedPath.setAttribute('fill', 'currentColor');
+    savedSvg.append(savedPath);
+    savedBadge.append(savedSvg);
+    thumb.append(savedBadge);
+
+    const title = document.createElement('span');
+    title.className = 'card-title';
+    title.textContent = item.title || item.videoId;
+
+    const meta = document.createElement('span');
+    meta.className = 'card-meta';
+    meta.textContent = itemMeta(item);
+
+    card.append(thumb, title, meta);
+    return card;
+  }
+
   function renderResults() {
     const fragment = document.createDocumentFragment();
-    for (const item of state.results) {
-      const card = document.createElement('button');
-      card.type = 'button';
-      card.className = 'video-card';
-      card.dataset.videoId = item.videoId;
-
-      const thumb = document.createElement('div');
-      thumb.className = 'thumb';
-      const thumbUrl = thumbnailUrl(item);
-      if (thumbUrl) {
-        const img = document.createElement('img');
-        img.src = thumbUrl;
-        img.alt = '';
-        img.loading = 'lazy';
-        img.decoding = 'async';
-        img.referrerPolicy = 'no-referrer';
-        img.addEventListener('error', () => img.classList.add('is-broken'), { once: true });
-        thumb.append(img);
-      }
-
-      if (item.liveNow) {
-        const live = document.createElement('span');
-        live.className = 'live-pill';
-        live.textContent = 'Live';
-        thumb.append(live);
-      } else {
-        const duration = formatDuration(item.lengthSeconds);
-        if (duration) {
-          const badge = document.createElement('span');
-          badge.className = 'duration';
-          badge.textContent = duration;
-          thumb.append(badge);
-        }
-      }
-
-      const title = document.createElement('span');
-      title.className = 'card-title';
-      title.textContent = item.title || item.videoId;
-
-      const meta = document.createElement('span');
-      meta.className = 'card-meta';
-      meta.textContent = itemMeta(item);
-
-      card.append(thumb, title, meta);
-      fragment.append(card);
-    }
+    const savedIds = savedVideoIds();
+    for (const item of state.results) fragment.append(buildVideoCard(item, savedIds));
     els.resultsGrid.replaceChildren(fragment);
     updateBrowseCount();
+    syncShelfWidth();
+  }
+
+  // The grid columns stretch to fill the row, so the shelf tiles follow the
+  // column width that is actually rendered instead of a guessed size.
+  function syncShelfWidth() {
+    const tracks = getComputedStyle(els.resultsGrid).gridTemplateColumns;
+    const first = parseFloat(tracks);
+    if (!first || !isFinite(first)) return;
+    document.documentElement.style.setProperty('--shelf-width', first + 'px');
+  }
+
+  function renderBookmarksShelf() {
+    if (state.browseMode !== 'trending') {
+      els.bookmarksShelf.hidden = true;
+      return;
+    }
+    const items = readBookmarks();
+    if (!items.length) {
+      els.bookmarksShelf.hidden = true;
+      els.bookmarksShelfRow.replaceChildren();
+      els.bookmarksShelfCount.textContent = '';
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    const savedIds = savedVideoIds();
+    for (const item of items) fragment.append(buildVideoCard(item, savedIds));
+    els.bookmarksShelfRow.replaceChildren(fragment);
+    els.bookmarksShelfCount.textContent =
+      items.length + (items.length === 1 ? ' saved video' : ' saved videos');
+    els.bookmarksShelf.hidden = false;
+    syncShelfWidth();
   }
 
   function setBrowseHeader(kicker, title) {
@@ -817,12 +996,13 @@
   }
 
   function showEmptyState() {
+    els.bookmarksShelf.hidden = true;
     els.emptyState.hidden = false;
     els.resultsGrid.replaceChildren();
     els.browseCount.textContent = '';
     els.moreBtn.hidden = true;
     setNotice('');
-    setBrowseHeader('Yattee', 'Watch');
+    setBrowseHeader('YouTube', 'Watch');
   }
 
   async function loadTrending() {
@@ -838,6 +1018,7 @@
     state.searchAbort = controller;
 
     state.browseMode = 'trending';
+    renderBookmarksShelf();
     state.query = '';
     state.page = 0;
     state.results = [];
@@ -846,7 +1027,7 @@
     els.emptyState.hidden = true;
     els.searchInput.value = '';
     updateSearchClear();
-    setBrowseHeader('', 'Trending');
+    setBrowseHeader('YouTube', 'Trending');
     setNotice('');
     renderSkeletons();
 
@@ -894,6 +1075,7 @@
     state.searchAbort = controller;
 
     state.browseMode = 'search';
+    renderBookmarksShelf();
     state.query = query;
     state.page = 1;
     state.results = [];
@@ -1004,7 +1186,7 @@
     return { session, signal: state.playAbort.signal };
   }
 
-  function openWatchShell(item) {
+  function openWatchShell(item, videoId) {
     els.browseView.hidden = true;
     els.watchView.hidden = false;
     els.refreshBtn.hidden = false;
@@ -1019,6 +1201,15 @@
     els.descMoreBtn.hidden = true;
     els.descMoreBtn.textContent = 'Show more';
     document.title = ((item && item.title) || 'Video') + ' - YouTube';
+    // The bookmark state is known from the id alone, so the button shows up
+    // right away instead of waiting for the stream to start.
+    syncBookmarkButton(videoId);
+    // Mute is always available and repeat only makes sense off a live
+    // stream, so both render as soon as the watch view opens.
+    els.muteBtn.hidden = false;
+    els.repeatBtn.hidden = !!(item && item.liveNow);
+    updateMuteButton();
+    updateRepeatButton();
   }
 
   async function openVideoById(id, fallback) {
@@ -1031,7 +1222,7 @@
     state.currentUrl = '';
     unlockEngine();
     const { session, signal } = startPlaybackSession();
-    openWatchShell(fallback);
+    openWatchShell(fallback, id);
 
     try {
       const data = await api(
@@ -1044,6 +1235,7 @@
       }
       state.current = data;
       renderWatchInfo(data, fallback);
+      syncBookmarkButton();
       playVideoData(data, session);
     } catch (err) {
       if (session !== state.playToken || !err || err.name === 'AbortError') return;
@@ -1080,7 +1272,7 @@
     state.currentId = '';
     unlockEngine();
     const { session, signal } = startPlaybackSession();
-    openWatchShell(null);
+    openWatchShell(null, ytId || '');
 
     try {
       const data = await api('/api/v1/extract?url=' + encodeURIComponent(url), { signal });
@@ -1090,6 +1282,7 @@
       }
       state.current = data;
       renderWatchInfo(data, null);
+      syncBookmarkButton();
       playVideoData(data, session);
     } catch (err) {
       if (session !== state.playToken || !err || err.name === 'AbortError') return;
@@ -1419,17 +1612,25 @@
     state.currentId = '';
     state.currentUrl = '';
     state.streamUrl = null;
+    syncBookmarkButton();
     els.watchView.hidden = true;
     els.refreshBtn.hidden = true;
     els.browseView.hidden = false;
     document.title = 'YouTube';
+    // Returning from a bookmarked video can land on a list that no longer
+    // matches the cache when the bookmark was removed while watching.
+    if (state.browseMode === 'bookmarks') {
+      state.results = readBookmarks();
+      setNotice(state.results.length ? '' : 'No bookmarks yet. Open a video and tap the bookmark button.');
+      renderResults();
+    }
   }
 
   // ---- timeline -----------------------------------------------------------
   // The bar follows YouTube's behaviour: a red VOD scrubber with time labels,
   // a LIVE badge instead of a scrubber on live streams, and controls that fade
   // out when the pointer has been still for a couple of seconds.
-  const TIMELINE_IDLE_MS = 2600;
+  const TIMELINE_IDLE_MS = 3200;
 
   function formatClock(sec) {
     const total = Math.max(0, Math.floor(Number(sec) || 0));
@@ -1539,6 +1740,9 @@
     }
     els.timeline.hidden = false;
     els.timeline.classList.remove('idle');
+    // Skipping only makes sense on a recorded video.
+    els.skipBackBtn.hidden = !state.engineSource.vod;
+    els.skipFwdBtn.hidden = !state.engineSource.vod;
     if (state.engineSource.vod) {
       state.timelineSeekable = true;
       setTimelineLive(false);
@@ -1630,6 +1834,15 @@
     try { ok = !!state.engine.seek(sec); } catch (err) { ok = false; }
     if (!ok) state.timelinePreview = null;
     revealTimeline();
+  }
+
+  function skipBy(delta) {
+    if (!state.engine || !state.timelineSeekable) return;
+    // Stack on the position we last asked for: the engine reports 0 while it
+    // re-opens the stream after a seek, so the played position is not a
+    // reliable base for the next skip.
+    const base = state.timelinePreview != null ? state.timelinePreview : state.timelinePosition;
+    seekTimelineTo(base + delta);
   }
 
   function timelineKeyDown(event) {
@@ -1808,6 +2021,8 @@
     els.connectBtn.textContent = 'Save & connect';
     closeSettings();
     leaveWatch();
+    updateBookmarksButton();
+    syncBookmarks();
     showToast('Connected to ' + draft.base.replace(/^https?:\/\//, ''));
     loadTrending();
     window.scrollTo(0, 0);
@@ -1817,6 +2032,7 @@
     if (!window.confirm('Forget the saved Yattee server and credentials?')) return;
     forgetCredentials();
     state.creds = null;
+    updateBookmarksButton();
     state.playToken += 1;
     if (state.playAbort) {
       state.playAbort.abort();
@@ -1852,6 +2068,334 @@
       els.toast.hidden = true;
       state.toastTimer = 0;
     }, 3800);
+  }
+
+  // ---- bookmarks ----------------------------------------------------------
+
+  // All server bookmark reads/writes go through one queue so a slow request
+  // cannot reorder a toggle that happened while it was in flight.
+  let bookmarkQueue = Promise.resolve();
+
+  function queueBookmarkTask(task) {
+    const run = bookmarkQueue.then(task, task);
+    bookmarkQueue = run.catch(() => {});
+    return run;
+  }
+
+  function syncSavedBadges() {
+    const ids = savedVideoIds();
+    const cards = document.querySelectorAll('.video-card[data-video-id]');
+    for (const card of cards) card.classList.toggle('saved', ids.has(card.dataset.videoId));
+  }
+
+  function updateBookmarksButton() {
+    const count = readBookmarks().length;
+    const label = count ? 'Bookmarks (' + count + ')' : 'Bookmarks';
+    els.bookmarksBtn.setAttribute('aria-label', label);
+    els.bookmarksBtn.title = label;
+    renderBookmarksShelf();
+    syncSavedBadges();
+  }
+
+  function syncBookmarkButton(id) {
+    const target = id || currentVideoId();
+    const saved = !!bookmarkedItem(target);
+    els.bookmarkBtn.hidden = !target;
+    els.bookmarkBtn.classList.toggle('active', saved);
+    els.bookmarkBtn.setAttribute('aria-pressed', saved ? 'true' : 'false');
+    const label = saved ? 'Remove from bookmarks' : 'Save to bookmarks';
+    els.bookmarkBtn.setAttribute('aria-label', label);
+    els.bookmarkBtn.title = label;
+  }
+
+  async function pushBookmarksToServer() {
+    if (!state.creds) return false;
+    const cacheKey = bookmarkCacheKey();
+    const revision = state.bookmarkRevision;
+    const items = readBookmarks();
+    try {
+      const payload = await api('/api/v1/bookmarks', {
+        method: 'PUT',
+        body: JSON.stringify({ items })
+      });
+      if (bookmarkCacheKey() !== cacheKey) return false;
+      const saved = payload && Array.isArray(payload.items) ? payload.items : null;
+      if (state.bookmarkRevision === revision) {
+        if (saved) writeBookmarks(saved);
+        markBookmarksDirty(false);
+      } else {
+        markBookmarksDirty(true);
+      }
+      updateBookmarksButton();
+      syncBookmarkButton();
+      return true;
+    } catch (err) {
+      if (bookmarkCacheKey() === cacheKey) markBookmarksDirty(true);
+      return false;
+    }
+  }
+
+  async function fetchBookmarksFromServer() {
+    if (!state.creds) return false;
+    const cacheKey = bookmarkCacheKey();
+    const revision = state.bookmarkRevision;
+    try {
+      const payload = await api('/api/v1/bookmarks');
+      if (bookmarkCacheKey() !== cacheKey) return false;
+      const items = Array.isArray(payload)
+        ? payload
+        : payload && Array.isArray(payload.items)
+          ? payload.items
+          : null;
+      if (!items) return false;
+      // A toggle made while the request was in flight wins over this copy.
+      if (state.bookmarkRevision !== revision) return false;
+      writeBookmarks(items);
+      markBookmarksDirty(false);
+      updateBookmarksButton();
+      syncBookmarkButton();
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function syncBookmarks() {
+    if (!state.creds) return Promise.resolve(false);
+    return queueBookmarkTask(async () => {
+      if (bookmarksAreDirty()) {
+        const pushed = await pushBookmarksToServer();
+        if (!pushed) return false;
+        // A toggle during the upload queued its own push; do not fetch over it.
+        if (bookmarksAreDirty()) return false;
+      }
+      return fetchBookmarksFromServer();
+    });
+  }
+
+  const LONG_PRESS_MS = 600;
+  const LONG_PRESS_SLOP = 12;
+  let thumbnailPress = null;
+  let suppressThumbnailClickUntil = 0;
+  let pendingBookmarkRemoval = null;
+
+  function cancelThumbnailPress() {
+    if (!thumbnailPress) return;
+    if (thumbnailPress.timer) window.clearTimeout(thumbnailPress.timer);
+    if (thumbnailPress.card) thumbnailPress.card.classList.remove('pressing');
+    thumbnailPress = null;
+  }
+
+  function startThumbnailPress(target, pointerId, x, y) {
+    const thumb = target && target.closest ? target.closest('.thumb') : null;
+    const card = thumb && thumb.closest('.video-card');
+    if (!card) return;
+    // The same press can arrive as pointerdown, mousedown and touchstart.
+    // Keep the first one so the timer is not restarted forever.
+    if (
+      thumbnailPress &&
+      thumbnailPress.card === card &&
+      Math.abs(thumbnailPress.startX - x) < 24 &&
+      Math.abs(thumbnailPress.startY - y) < 24
+    ) {
+      return;
+    }
+    suppressThumbnailClickUntil = 0;
+    cancelThumbnailPress();
+    card.classList.add('pressing');
+    thumbnailPress = {
+      pointerId,
+      card,
+      startX: x,
+      startY: y,
+      fired: false,
+      timer: window.setTimeout(() => {
+        if (!thumbnailPress) return;
+        thumbnailPress.timer = 0;
+        thumbnailPress.fired = true;
+        suppressThumbnailClickUntil = Date.now() + 1000;
+        handleThumbnailLongPress(card);
+      }, LONG_PRESS_MS)
+    };
+  }
+
+  function handleThumbnailPointerDown(event) {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    if (event.isPrimary === false) return;
+    startThumbnailPress(event.target, event.pointerId, event.clientX, event.clientY);
+  }
+
+  function handleThumbnailMouseDown(event) {
+    if (event.button !== 0) return;
+    startThumbnailPress(event.target, 'mouse-' + event.button, event.clientX, event.clientY);
+  }
+
+  function handleThumbnailTouchStart(event) {
+    const touch = event.touches && event.touches[0];
+    if (!touch) return;
+    startThumbnailPress(event.target, 'touch-' + touch.identifier, touch.clientX, touch.clientY);
+  }
+
+  function handleThumbnailPointerMove(event) {
+    if (!thumbnailPress || event.pointerId !== thumbnailPress.pointerId) return;
+    if (thumbnailPress.fired) return;
+    const dx = event.clientX - thumbnailPress.startX;
+    const dy = event.clientY - thumbnailPress.startY;
+    if (Math.sqrt(dx * dx + dy * dy) > LONG_PRESS_SLOP) cancelThumbnailPress();
+  }
+
+  function handleThumbnailPointerUp(event) {
+    if (!thumbnailPress || event.pointerId !== thumbnailPress.pointerId) return;
+    cancelThumbnailPress();
+  }
+
+  function suppressThumbnailClick(event) {
+    if (Date.now() > suppressThumbnailClickUntil) return;
+    if (!event.target.closest('.thumb')) return;
+    suppressThumbnailClickUntil = 0;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function preventThumbnailContextMenu(event) {
+    if (event.target.closest('.thumb')) event.preventDefault();
+  }
+
+  function handleThumbnailLongPress(card) {
+    const id = card.dataset.videoId;
+    if (!id) return;
+    const item = findVideoItem(id);
+    if (bookmarkedItem(id)) {
+      requestBookmarkRemoval(id, item ? item.title : '');
+      return;
+    }
+    if (!item) {
+      showToast('Could not save this video.');
+      return;
+    }
+    applyBookmarkChange(id, item, false);
+  }
+
+  function requestBookmarkRemoval(id, title) {
+    pendingBookmarkRemoval = { id, title: title || id };
+    els.bookmarkConfirmText.textContent =
+      '\u201c' + pendingBookmarkRemoval.title + '\u201d will be removed from your bookmarks.';
+    els.bookmarkConfirm.hidden = false;
+    document.body.classList.add('modal-open');
+    try {
+      els.cancelRemoveBookmarkBtn.focus({ preventScroll: true });
+    } catch (err) {}
+  }
+
+  function closeBookmarkConfirm() {
+    if (els.bookmarkConfirm.hidden) return;
+    els.bookmarkConfirm.hidden = true;
+    if (els.settingsModal.hidden) document.body.classList.remove('modal-open');
+    pendingBookmarkRemoval = null;
+  }
+
+  function confirmBookmarkRemoval() {
+    const pending = pendingBookmarkRemoval;
+    closeBookmarkConfirm();
+    if (!pending) return;
+    applyBookmarkChange(pending.id, null, true);
+  }
+
+  function bookmarkEntry(id, source) {
+    const data = source || state.current || {};
+    return {
+      videoId: id,
+      title: data.title || els.watchTitle.textContent || id,
+      author: data.author || '',
+      authorThumbnails: Array.isArray(data.authorThumbnails) ? data.authorThumbnails : [],
+      videoThumbnails: Array.isArray(data.videoThumbnails) ? data.videoThumbnails : [],
+      viewCount: Number(data.viewCount) || 0,
+      published: data.published || '',
+      publishedText: data.publishedText || '',
+      lengthSeconds: Number(data.lengthSeconds) || 0,
+      liveNow: !!data.liveNow,
+      savedAt: Date.now()
+    };
+  }
+
+  function findVideoItem(id) {
+    if (!id) return null;
+    return (
+      state.results.find((entry) => entry.videoId === id) ||
+      readBookmarks().find((entry) => entry.videoId === id) ||
+      null
+    );
+  }
+
+  function applyBookmarkChange(id, data, remove) {
+    const items = readBookmarks();
+    const index = items.findIndex((entry) => entry.videoId === id);
+    if (remove) {
+      if (index === -1) return false;
+      items.splice(index, 1);
+    } else {
+      if (index !== -1) return false;
+      items.unshift(bookmarkEntry(id, data));
+    }
+    if (!writeBookmarks(items)) {
+      showToast('Could not update bookmarks in this browser.');
+      return false;
+    }
+    state.bookmarkRevision += 1;
+    showToast(remove ? 'Removed from bookmarks.' : 'Saved to bookmarks.');
+    syncBookmarkButton();
+    updateBookmarksButton();
+    if (state.browseMode === 'bookmarks') {
+      state.results = readBookmarks();
+      setNotice(state.results.length ? '' : 'No bookmarks yet. Open a video and tap the bookmark button.');
+      renderResults();
+    }
+    queueBookmarkTask(pushBookmarksToServer).then((ok) => {
+      if (!ok) showToast('Bookmark change saved on this device; it will sync when the server is reachable.');
+    });
+    return true;
+  }
+
+  function toggleBookmark() {
+    const id = currentVideoId();
+    if (!id) return;
+    if (bookmarkedItem(id)) {
+      // Removing asks for confirmation, the same as a long press on a
+      // thumbnail.
+      const title = (state.current && state.current.title) || els.watchTitle.textContent || id;
+      requestBookmarkRemoval(id, title);
+      return;
+    }
+    applyBookmarkChange(id, state.current, false);
+  }
+
+  function openBookmarks() {
+    leaveWatch();
+    if (state.searchAbort) {
+      state.searchAbort.abort();
+      state.searchAbort = null;
+    }
+    state.searchToken += 1;
+    state.browseMode = 'bookmarks';
+    renderBookmarksShelf();
+    state.query = '';
+    state.page = 0;
+    state.loadingMore = false;
+    state.results = readBookmarks();
+    els.emptyState.hidden = true;
+    els.moreBtn.hidden = true;
+    els.searchInput.value = '';
+    updateSearchClear();
+    setBrowseHeader('Saved', 'Bookmarks');
+    setNotice(state.results.length ? '' : 'No bookmarks yet. Open a video and tap the bookmark button.');
+    renderResults();
+    window.scrollTo(0, 0);
+    syncBookmarks().then(() => {
+      if (state.browseMode !== 'bookmarks' || els.browseView.hidden) return;
+      state.results = readBookmarks();
+      setNotice(state.results.length ? '' : 'No bookmarks yet. Open a video and tap the bookmark button.');
+      renderResults();
+    });
   }
 
   function handleHome() {
@@ -1892,8 +2436,21 @@
     openVideoById(id, item);
   }
 
+  function handleShelfClick(event) {
+    const card = event.target.closest('.video-card');
+    if (!card) return;
+    const id = card.dataset.videoId;
+    if (!id) return;
+    const item = readBookmarks().find((entry) => entry.videoId === id) || null;
+    openVideoById(id, item);
+  }
+
   function handleKeyDown(event) {
     if (event.key === 'Escape') {
+      if (!els.bookmarkConfirm.hidden) {
+        closeBookmarkConfirm();
+        return;
+      }
       if (!els.settingsModal.hidden) {
         closeSettings();
         return;
@@ -1908,6 +2465,7 @@
 
   function bindEvents() {
     els.homeBtn.addEventListener('click', handleHome);
+    els.bookmarksBtn.addEventListener('click', openBookmarks);
     els.settingsBtn.addEventListener('click', () => openSettings());
     els.emptyConnectBtn.addEventListener('click', () => openSettings());
     els.closeSettingsBtn.addEventListener('click', closeSettings);
@@ -1922,12 +2480,36 @@
     });
     els.searchInput.addEventListener('input', updateSearchClear);
     els.resultsGrid.addEventListener('click', handleResultsClick);
+    els.bookmarksShelfRow.addEventListener('click', handleShelfClick);
+    els.resultsGrid.addEventListener('pointerdown', handleThumbnailPointerDown);
+    els.bookmarksShelfRow.addEventListener('pointerdown', handleThumbnailPointerDown);
+    els.resultsGrid.addEventListener('mousedown', handleThumbnailMouseDown);
+    els.bookmarksShelfRow.addEventListener('mousedown', handleThumbnailMouseDown);
+    els.resultsGrid.addEventListener('touchstart', handleThumbnailTouchStart, { passive: true });
+    els.bookmarksShelfRow.addEventListener('touchstart', handleThumbnailTouchStart, { passive: true });
+    els.resultsGrid.addEventListener('click', suppressThumbnailClick, true);
+    els.bookmarksShelfRow.addEventListener('click', suppressThumbnailClick, true);
+    els.resultsGrid.addEventListener('contextmenu', preventThumbnailContextMenu);
+    els.bookmarksShelfRow.addEventListener('contextmenu', preventThumbnailContextMenu);
+    window.addEventListener('pointermove', handleThumbnailPointerMove, { passive: true });
+    window.addEventListener('pointerup', handleThumbnailPointerUp);
+    window.addEventListener('pointercancel', cancelThumbnailPress);
+    window.addEventListener('mouseup', cancelThumbnailPress);
+    window.addEventListener('touchend', cancelThumbnailPress);
+    window.addEventListener('touchcancel', cancelThumbnailPress);
+    window.addEventListener('blur', cancelThumbnailPress);
+    els.confirmRemoveBookmarkBtn.addEventListener('click', confirmBookmarkRemoval);
+    els.cancelRemoveBookmarkBtn.addEventListener('click', closeBookmarkConfirm);
+    els.closeBookmarkConfirmBtn.addEventListener('click', closeBookmarkConfirm);
     els.moreBtn.addEventListener('click', loadMoreResults);
     els.backBtn.addEventListener('click', leaveWatch);
+    els.bookmarkBtn.addEventListener('click', toggleBookmark);
     els.refreshBtn.addEventListener('click', refreshCurrent);
     els.muteBtn.addEventListener('click', toggleMute);
     els.repeatBtn.addEventListener('click', toggleRepeat);
     els.timelinePlayBtn.addEventListener('click', toggleTimelinePause);
+    els.skipBackBtn.addEventListener('click', () => skipBy(-10));
+    els.skipFwdBtn.addEventListener('click', () => skipBy(10));
     els.descMoreBtn.addEventListener('click', function () {
       const expanded = els.watchDescription.classList.toggle('expanded');
       els.descMoreBtn.textContent = expanded ? 'Show less' : 'Show more';
@@ -1938,9 +2520,16 @@
     els.timelineTrack.addEventListener('pointercancel', finishTimelineSeek);
     els.timelineTrack.addEventListener('keydown', timelineKeyDown);
     els.playerStage.addEventListener('pointermove', revealTimeline);
-    els.playerStage.addEventListener('pointerdown', revealTimeline);
+    els.playerStage.addEventListener('pointerdown', () => {
+      // Remember the tap so the leave that follows it cannot shorten the
+      // idle time: an explicit tap always gets the full dwell.
+      state.timelineLastTap = Date.now();
+      revealTimeline();
+    });
     els.playerStage.addEventListener('pointerleave', () => {
-      if (!state.timelineDragging) armTimelineHide(900);
+      if (state.timelineDragging) return;
+      if (Date.now() - state.timelineLastTap < 1500) return;
+      armTimelineHide(900);
     });
     document.addEventListener('keydown', handleKeyDown);
   }
@@ -1948,6 +2537,7 @@
   function boot() {
     bindEvents();
     updateEngineSupport();
+    updateBookmarksButton();
 
     const saved = readSavedCredentials();
     if (!saved) {
@@ -1967,6 +2557,8 @@
       return;
     }
 
+    updateBookmarksButton();
+    syncBookmarks();
     loadTrending();
   }
 
