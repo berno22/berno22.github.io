@@ -1432,11 +1432,11 @@ body.modal-open::before {
 }
 
 @media (max-width: 560px) {
-  /* A phone shows the same desktop layout in a much smaller space. The scale
-     is set to 1 for now: the tap targets are grown below so they stay
-     comfortable without it. */
+  /* A phone shows the same desktop layout in a much smaller space. 0.8 fits
+     roughly a quarter more of the page on screen; the tap targets below are
+     sized in layout pixels so they stay at least 44 points once scaled. */
   html {
-    zoom: 1;
+    zoom: 0.8;
   }
 
   :root {
@@ -1448,6 +1448,8 @@ body.modal-open::before {
     --stage-skip-icon: 46px;
     --stage-skip-label: 13px;
     --stage-skip-inset: 10px;
+    --timeline-track-h: 44px;
+    --timeline-thumb: 24px;
   }
 
   .grid {
@@ -1475,6 +1477,8 @@ body.modal-open::before {
 
   .brand-mark {
     display: block;
+    width: 36px;
+    height: 36px;
   }
 
   .appbar {
@@ -1487,15 +1491,19 @@ body.modal-open::before {
     height: 56px;
   }
 
+  .search {
+    height: 56px;
+  }
+
   .watch-bar .text-button {
-    min-height: 52px;
+    min-height: 56px;
   }
 
   /* The back button is a different class, so it needs the same treatment:
-     52 layout px is 42 points under the 0.8 scale. */
+     56 layout px is 44.8 points under the 0.8 scale. */
   .watch-bar .back-button {
-    min-height: 52px;
-    min-width: 62px;
+    min-height: 56px;
+    min-width: 68px;
   }
 
   .text-button {
