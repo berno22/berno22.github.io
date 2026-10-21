@@ -59,6 +59,14 @@
   // The frame queue cap (40) holds 4s at the source's 10fps.
   var VIDEO_DECODE_LEAD_MS = 2200;
 
+  // The relay's upstream connection ramps up slowly: the first few seconds
+  // arrive below realtime, then it settles at several times the bitrate. If
+  // playback starts as soon as the first samples decode, the clock outruns
+  // that ramp and the picture runs dry a few seconds in. Hold the anchor until
+  // enough media is queued to cover the ramp-up.
+  var START_BUFFER_SEC = 6;
+  var ANCHOR_MAX_WAIT_MS = 10000;
+
   // How far ahead of its due time audio is decoded and poured into the ring.
   // A ring holding exactly this much is playing the same media instant the
   // picture is showing - the decode lead and the buffered depth cancel each
@@ -398,7 +406,7 @@
       aInitFed: false, aSegs: [], aCursor: 0, aBase: '', aPlaylistUrl: '',
       aLastUrl: null, aPushedKeys: null, aPumpRunning: false, aSegDur: 5,
       aMediaEnd: 0, aSegsFetched: 0, aLastQueuedTs: null,
-      fq: [], pend: [], aPend: [], prePend: [], preStart: 0,
+      fq: [], pend: [], aPend: [], prePend: [], preStart: 0, preLastSec: 0,
       paused: !!this.paused, pausedAt: this.paused ? Date.now() : 0,
       vT0: -1, vBaseSec: -1, mediaEnd: 0, frameIv: 0, lastFrameDue: -1,
       paintTimer: null, pumpTimer: null, rafId: 0, statsTimer: 0,
@@ -566,7 +574,7 @@
         // the whole file into the pre-anchor queue: the anchor can be waiting
         // for a separate audio file, and letting 139 seconds of video pile up
         // would either lose samples at the cap or waste memory.
-        if (s.vBaseSec < 0 && s.prePend.length > 300) return sleep(100).then(readLoop);
+        if (s.vBaseSec < 0 && startupBufferSec(s) > START_BUFFER_SEC + 4) return sleep(100).then(readLoop);
         if (s.vTrack && bufferedOf(s) > 24) return sleep(200).then(readLoop);
         return reader.read().then(function (part) {
           if (part.done) {
@@ -657,7 +665,7 @@
       var reader = r.body.getReader();
       return (function readLoop() {
         if (s.stopped || self.gen !== gen || s.mp4Done) return Promise.resolve();
-        if (s.vBaseSec < 0 && s.prePend.length > 300) return sleep(100).then(readLoop);
+        if (s.vBaseSec < 0 && startupBufferSec(s) > START_BUFFER_SEC + 4) return sleep(100).then(readLoop);
         if (s.vTrack && bufferedOf(s) > 24) return sleep(200).then(readLoop);
         return reader.read().then(function (part) {
           if (part.done) {
@@ -1641,6 +1649,15 @@
     return false;
   }
 
+  // Downloaded video held before the media clock is anchored. Measured by
+  // timestamp span rather than sample count so 60fps sources are judged the
+  // same as 30fps ones.
+  function startupBufferSec(s) {
+    if (!s.prePend.length) return 0;
+    var last = s.preLastSec || s.prePend[s.prePend.length - 1].sec;
+    return Math.max(0, last - s.prePend[0].sec);
+  }
+
   // A dual-file VOD (video-only + audio-only MP4) must not start its media
   // clock until the audio side can actually play. The relay serves the two
   // files with very different cold-start latency: anchoring on the first video
@@ -1691,12 +1708,14 @@
         // keeps the state position small and the anchor independent of how
         // far into the live window we joined.
         if (s.vBaseSec < 0) {
-          if (s.prePend.length < 600) s.prePend.push({ sync: sync, sec: sec, raw: raw });
-          else s.drops++;
-          if (s.audioUrl && !self.audioReadyForAnchor(s)) {
-            if (!s.preStart) s.preStart = Date.now();
-            continue;
-          }
+          if (s.prePend.length < 600) {
+            s.prePend.push({ sync: sync, sec: sec, raw: raw });
+            if (sec > s.preLastSec) s.preLastSec = sec;
+          } else s.drops++;
+          if (!s.preStart) s.preStart = Date.now();
+          if (s.audioUrl && !self.audioReadyForAnchor(s)) continue;
+          if (s.vod && startupBufferSec(s) < START_BUFFER_SEC &&
+              Date.now() - s.preStart < ANCHOR_MAX_WAIT_MS) continue;
           self.anchorVideo(s);
           continue;
         }
@@ -1802,8 +1821,10 @@
       // take seconds to arrive from a deep byte offset, so wait well past the
       // live limit: anchoring the picture first leaves the sound seconds late,
       // and the catch-up then skips samples and shows up as drift.
-      var anchorWait = (s.vod && s.startSec > 0.05) ? 15000 : 5000;
-      if (this.audioReadyForAnchor(s) || (s.preStart && now - s.preStart > anchorWait)) this.anchorVideo(s);
+      if (!s.preStart) s.preStart = Date.now();
+      var anchorWait = (s.vod && s.startSec > 0.05) ? 15000 : (s.vod ? ANCHOR_MAX_WAIT_MS : 5000);
+      var enough = !s.vod || startupBufferSec(s) >= START_BUFFER_SEC;
+      if ((this.audioReadyForAnchor(s) && enough) || now - s.preStart > anchorWait) this.anchorVideo(s);
     }
     while (s.pend.length && s.pend[0].due < now - 500) { s.pend.shift(); s.dropsLate++; }
     // Feed well before presentation. The canvas still paints against each
@@ -1827,7 +1848,7 @@
     // rest of the stream. The due time is worked out here, at release, rather
     // than when the sample was queued, because audio can be demuxed before the
     // anchor exists.
-    if (s.adec && s.adec.state === 'configured' && s.vT0 >= 0) {
+    if (s.adec && s.adec.state === 'configured' && s.vT0 >= 0 && s.drawn > 0) {
       // Audio timestamps come from the shared source clock; subtract the video
       // anchor so this queue lines up with the video due times instead of
       // playing seconds ahead or behind when the two renditions joined at

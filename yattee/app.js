@@ -123,6 +123,8 @@
     stallDrawn: -1,
     stallDrawnAt: 0,
     stallStartAt: 0,
+    rebuffer: false,
+    rebufferAt: 0,
     restartCount: 0,
     restartAt: 0,
     restartTimer: 0,
@@ -576,12 +578,38 @@
   // when a load never reaches its first frame. A small budget stops a stream
   // that is simply broken from restarting forever.
   const STALL_MS = 7000;
+  const REBUFFER_STALL_MS = 3000;
   const START_STALL_MS = 25000;
   const MAX_AUTO_RESTARTS = 5;
   const RESTART_BUDGET_RESET_MS = 120000;
 
   function watchForStall(snapshot) {
     const now = Date.now();
+    // Starved but not broken: freeze the media clock and let the relay catch
+    // up instead of tearing the stream down and reopening it from scratch.
+    if (state.rebuffer) {
+      if (!snapshot || !snapshot.stage || snapshot.stage === 'idle' || snapshot.stage === 'error') {
+        state.rebuffer = false;
+        return;
+      }
+      if ((snapshot.buffered || 0) >= 3 || snapshot.ended) {
+        state.rebuffer = false;
+        state.stallDrawn = snapshot.drawn || 0;
+        state.stallDrawnAt = 0;
+        state.stallStartAt = 0;
+        try { state.engine.setPaused(false); } catch (err) {}
+        updatePlayButton(false);
+        hideOverlay();
+        return;
+      }
+      if (now - state.rebufferAt > 20000) {
+        state.rebuffer = false;
+        try { state.engine.setPaused(false); } catch (err) {}
+        updatePlayButton(false);
+        autoRestart('Stream stalled, reconnecting...');
+      }
+      return;
+    }
     if (!snapshot || !snapshot.stage || snapshot.stage === 'idle' || snapshot.stage === 'error') return;
     if (snapshot.ended) return;
     if (snapshot.paused) return;
@@ -603,7 +631,18 @@
       return;
     }
     if (!state.stallDrawnAt) { state.stallDrawnAt = now; return; }
-    if (now - state.stallDrawnAt < STALL_MS) return;
+    const starved = typeof snapshot.buffered === 'number' && snapshot.buffered < 0.5;
+    if (now - state.stallDrawnAt < (starved ? REBUFFER_STALL_MS : STALL_MS)) return;
+    if (state.mode === 'engine' && starved) {
+      state.rebuffer = true;
+      state.rebufferAt = now;
+      state.stallDrawn = drawn;
+      state.stallDrawnAt = 0;
+      try { state.engine.setPaused(true); } catch (err) {}
+      updatePlayButton(true);
+      showLoading('Buffering...');
+      return;
+    }
     autoRestart('Stream stalled, reconnecting...');
   }
 
@@ -615,6 +654,7 @@
   }
 
   function autoRestart(message) {
+    state.rebuffer = false;
     if (state.mode !== 'engine' || state.engineFailed || !state.engine || !state.engineSource || !state.streamUrl) return;
     if (state.restartTimer) return;
     if (state.restartCount >= MAX_AUTO_RESTARTS) {
@@ -1227,6 +1267,7 @@
     state.stallDrawn = -1;
     state.stallDrawnAt = 0;
     state.stallStartAt = 0;
+    state.rebuffer = false;
     state.restartCount = 0;
     state.restartAt = 0;
     state.restartDrawn = -1;
@@ -1421,6 +1462,10 @@
     return '';
   }
 
+  // The relay is the bottleneck for Chrome, and 1080p sits too close to its
+  // delivered bitrate. 720p leaves enough headroom to ride out the dips.
+  const ENGINE_MAX_HEIGHT = 720;
+
   function pickEngineFormat(list, maxHeight) {
     const cap = maxHeight || 1080;
     const usable = list.filter((entry) => entry && entry.format);
@@ -1533,17 +1578,17 @@
     const mp4Formats = formats.filter((entry) => entry.kind === 'mp4');
 
     if (live) {
-      if (hlsUrl) return { url: hlsUrl, kind: 'hls', vod: false, maxHeight: 1080 };
-      const hls = pickEngineFormat(hlsFormats, 1080);
-      return hls ? { url: resolveUrl(hls.format.url), kind: 'hls', vod: false, maxHeight: 1080 } : null;
+      if (hlsUrl) return { url: hlsUrl, kind: 'hls', vod: false, maxHeight: ENGINE_MAX_HEIGHT };
+      const hls = pickEngineFormat(hlsFormats, ENGINE_MAX_HEIGHT);
+      return hls ? { url: resolveUrl(hls.format.url), kind: 'hls', vod: false, maxHeight: ENGINE_MAX_HEIGHT } : null;
     }
 
-    if (hlsUrl) return { url: hlsUrl, kind: 'hls', vod: true, maxHeight: 1080 };
+    if (hlsUrl) return { url: hlsUrl, kind: 'hls', vod: true, maxHeight: ENGINE_MAX_HEIGHT };
     // Dual-source VOD: when the adaptive ladder has a rendition above what the
     // muxed list can offer, play the video-only file and feed the audio-only
     // file on the engine's separate audio path.
-    const muxed = pickEngineFormat(mp4Formats, 1080);
-    const adaptiveVideo = pickAdaptiveVideo(data.adaptiveFormats, 1080);
+    const muxed = pickEngineFormat(mp4Formats, ENGINE_MAX_HEIGHT);
+    const adaptiveVideo = pickAdaptiveVideo(data.adaptiveFormats, ENGINE_MAX_HEIGHT);
     const adaptiveAudio = pickAdaptiveAudio(data.adaptiveFormats);
     if (adaptiveVideo && adaptiveAudio) {
       const adaptiveHeight = formatHeight(adaptiveVideo);
@@ -1553,14 +1598,14 @@
           audioUrl: relayMediaUrl(resolveUrl(adaptiveAudio.url)),
           kind: 'mp4',
           vod: true,
-          maxHeight: 1080,
+          maxHeight: ENGINE_MAX_HEIGHT,
           height: adaptiveHeight
         };
       }
     }
-    if (muxed) return { url: relayMediaUrl(resolveUrl(muxed.format.url)), kind: 'mp4', vod: true, maxHeight: 1080 };
-    const hls = pickEngineFormat(hlsFormats, 1080);
-    if (hls) return { url: resolveUrl(hls.format.url), kind: 'hls', vod: true, maxHeight: 1080 };
+    if (muxed) return { url: relayMediaUrl(resolveUrl(muxed.format.url)), kind: 'mp4', vod: true, maxHeight: ENGINE_MAX_HEIGHT };
+    const hls = pickEngineFormat(hlsFormats, ENGINE_MAX_HEIGHT);
+    if (hls) return { url: resolveUrl(hls.format.url), kind: 'hls', vod: true, maxHeight: ENGINE_MAX_HEIGHT };
     return null;
   }
 
