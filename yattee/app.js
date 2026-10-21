@@ -110,6 +110,8 @@
     standardFallbackTimer: 0,
     standardFallback: null,
     standardRecovering: 0,
+    standardDirect: false,
+    standardRelayTried: false,
     timelineDragging: false,
     timelinePreview: null,
     timelinePreviewAt: 0,
@@ -1228,6 +1230,8 @@
     state.restartAt = 0;
     state.restartDrawn = -1;
     state.restartPosition = 0;
+    state.standardDirect = false;
+    state.standardRelayTried = false;
     cancelReconnect();
     if (state.engine) {
       try { state.engine.setPaused(false); } catch (err) {}
@@ -1280,9 +1284,18 @@
     const { session, signal } = startPlaybackSession();
     openWatchShell(fallback, id);
 
+    // Safari's native player does far better with the direct googlevideo
+    // files: the relay tunnel is the slow part of the path, and a 1080p
+    // stream needs more headroom than it has. Direct URLs work while the
+    // phone shares the server's public address; the relay is the fallback
+    // for everywhere else (see retryStandardThroughRelay).
+    const standard = useStandardPlayer();
+    state.standardDirect = standard;
+    const proxyQuery = standard ? 'proxy=false' : 'proxy=true&proxy_mode=relay';
+
     try {
       const data = await api(
-        '/api/v1/videos/' + encodeURIComponent(id) + '?proxy=true&proxy_mode=relay',
+        '/api/v1/videos/' + encodeURIComponent(id) + '?' + proxyQuery,
         { signal }
       );
       if (session !== state.playToken) return;
@@ -1613,6 +1626,31 @@
     return true;
   }
 
+  // The direct files are much faster, but they are signed for the public
+  // address the server extracted them from. When the phone is somewhere else
+  // (or YouTube refuses one), resolve the same video through the relay once.
+  async function retryStandardThroughRelay(session) {
+    if (!state.standardDirect || state.standardRelayTried) return false;
+    const id = currentVideoId();
+    if (!id) return false;
+    state.standardRelayTried = true;
+    try {
+      const data = await api(
+        '/api/v1/videos/' + encodeURIComponent(id) + '?proxy=true&proxy_mode=relay'
+      );
+      if (session !== state.playToken || state.mode !== 'standard') return true;
+      state.standardDirect = false;
+      // The failed direct source may report another error after the relay
+      // source replaces it; that is not a failure of the new stream.
+      state.standardRecovering = Date.now();
+      state.current = data;
+      startStandardPlayer(data, session);
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
   function playMedia(element) {
     if (!element) return;
     try {
@@ -1686,6 +1724,14 @@
         if (els.standardVideo.currentTime > 0) return;
         // Data is already arriving, so the picture is on its way.
         if (els.standardVideo.readyState >= 2) return;
+        if (state.standardDirect) {
+          const active = session;
+          retryStandardThroughRelay(active).then((retried) => {
+            if (retried || active !== state.playToken || state.mode !== 'standard') return;
+            useStandardFallback();
+          });
+          return;
+        }
         useStandardFallback();
       }, 12000);
     }
@@ -2724,8 +2770,7 @@
     els.standardVideo.addEventListener('timeupdate', standardReady);
     // Safari can refuse to start the picture at all. A tap on the frame is a
     // fresh gesture, so the play is worth another try.
-    els.standardVideo.addEventListener('error', () => {
-      if (state.mode !== 'standard') return;
+    const failStandard = () => {
       // A browser that will not show the video-only stream gets the muxed
       // one before the player gives up.
       if (useStandardFallback()) return;
@@ -2735,6 +2780,22 @@
       if (els.standardVideo.currentTime > 0 || els.standardVideo.readyState >= 2) return;
       if (Date.now() - (state.standardRecovering || 0) < 5000) return;
       showPlaybackError('The standard video player could not open this stream.');
+    };
+    els.standardVideo.addEventListener('error', () => {
+      if (state.mode !== 'standard') return;
+      const active = state.playToken;
+      if (state.standardDirect && !state.standardRelayTried) {
+        retryStandardThroughRelay(active).then((retried) => {
+          if (retried || active !== state.playToken || state.mode !== 'standard') return;
+          failStandard();
+        });
+        return;
+      }
+      failStandard();
+    });
+    els.standardAudio.addEventListener('error', () => {
+      if (state.mode !== 'standard' || !state.standardDirect) return;
+      retryStandardThroughRelay(state.playToken);
     });
     // The picture and the separate audio track are two elements, so the
     // audio follows the video: same transport, same position.
