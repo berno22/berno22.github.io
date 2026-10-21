@@ -4,24 +4,18 @@
   const STORAGE_KEY = 'yattee-tesla.connection.v1';
   const BOOKMARK_KEY = 'yattee-tesla.bookmarks.v1';
   const BOOKMARK_CACHE_PREFIX = 'yattee-tesla.bookmarks.v2:';
-  const STANDARD_PLAYER_KEY = 'yattee-tesla.standard-player.v1';
   const BOOKMARK_LIMIT = 100;
   const DEFAULT_SERVER = 'https://yattee.vpmbd45g3cfj.opentunnel.xyz';
 
-  // The standard player is a per-browser preference only: it is never sent
-  // to the server. Absent means off.
+  // Safari cannot run the Tesla Engine, so it gets the browser's own player.
+  // Everything else uses the engine, which is the better picture.
   function useStandardPlayer() {
-    try {
-      return localStorage.getItem(STANDARD_PLAYER_KEY) === '1';
-    } catch (err) {
-      return false;
-    }
-  }
-
-  function setStandardPlayerEnabled(on) {
-    try {
-      localStorage.setItem(STANDARD_PLAYER_KEY, on ? '1' : '0');
-    } catch (err) {}
+    const ua = navigator.userAgent || '';
+    // Every iOS browser is WebKit, and WebKit on iOS has no usable WebCodecs.
+    if (/iPhone|iPad|iPod/.test(ua)) return true;
+    // Safari on the desktop: WebKit without any of the other engines' marks.
+    if (/AppleWebKit/.test(ua) && !/Chrome|Chromium|CriOS|FxiOS|Edg|OPR|Android/.test(ua)) return true;
+    return typeof window.safari !== 'undefined' && typeof window.safari.pushNotification === 'function';
   }
 
   const els = {
@@ -53,7 +47,6 @@
     playerCanvas: document.getElementById('playerCanvas'),
     standardVideo: document.getElementById('standardVideo'),
     standardAudio: document.getElementById('standardAudio'),
-    standardPlayerInput: document.getElementById('standardPlayerInput'),
     playerOverlay: document.getElementById('playerOverlay'),
     overlayText: document.getElementById('overlayText'),
     engineBadge: document.getElementById('engineBadge'),
@@ -744,13 +737,29 @@
 
   function thumbnailUrl(item) {
     const thumbs = Array.isArray(item && item.videoThumbnails) ? item.videoThumbnails : [];
-    const chosen =
-      thumbs.find((thumb) => thumb && thumb.quality === 'medium') ||
-      thumbs.find((thumb) => thumb && thumb.quality === 'high') ||
-      thumbs.find((thumb) => thumb && thumb.quality === 'default') ||
-      thumbs.find((thumb) => thumb && thumb.url) ||
+    // A thumbnail served through the server's proxy carries a signed token
+    // that expires, and a dead one leaves the card with no picture at all.
+    // The direct YouTube addresses do not expire, so prefer those.
+    const plain = (thumb) => thumb && thumb.url && !/[?&]token=/.test(thumb.url);
+    const pick = (list) =>
+      list.find((thumb) => thumb && thumb.quality === 'medium') ||
+      list.find((thumb) => thumb && thumb.quality === 'high') ||
+      list.find((thumb) => thumb && thumb.quality === 'default') ||
+      list.find((thumb) => thumb && thumb.url) ||
       null;
+    const chosen = pick(thumbs.filter(plain)) || pick(thumbs);
     return chosen && chosen.url ? resolveUrl(chosen.url) : '';
+  }
+
+  // If a picture does not come, try the plain YouTube addresses for the
+  // video. They are the same files the server would have proxied.
+  function directThumbnails(videoId) {
+    return [
+      'https://i.ytimg.com/vi/' + videoId + '/hqdefault.jpg',
+      'https://i.ytimg.com/vi/' + videoId + '/maxresdefault.jpg',
+      'https://i.ytimg.com/vi/' + videoId + '/mqdefault.jpg',
+      'https://i.ytimg.com/vi/' + videoId + '/default.jpg'
+    ];
   }
 
   function formatDuration(seconds) {
@@ -936,7 +945,19 @@
       img.decoding = 'async';
       img.draggable = false;
       img.referrerPolicy = 'no-referrer';
-      img.addEventListener('error', () => img.classList.add('is-broken'), { once: true });
+      let fallbackIndex = 0;
+      const fallbacks = directThumbnails(item.videoId);
+      img.addEventListener('error', () => {
+        // A thumbnail that has expired or failed is replaced by the plain
+        // YouTube address for the same video.
+        if (fallbackIndex < fallbacks.length) {
+          const next = fallbacks[fallbackIndex];
+          fallbackIndex += 1;
+          img.src = next;
+          return;
+        }
+        img.classList.add('is-broken');
+      });
       thumb.append(img);
     }
 
@@ -2168,7 +2189,6 @@
       fillSettingsForm(state.creds);
       showSettingsMessage('');
     }
-    els.standardPlayerInput.checked = useStandardPlayer();
     els.settingsModal.hidden = false;
     document.body.classList.add('modal-open');
     if (message) showSettingsMessage(message);
@@ -2691,12 +2711,6 @@
     els.closeSettingsBtn.addEventListener('click', closeSettings);
     els.settingsForm.addEventListener('submit', submitSettings);
     els.clearBtn.addEventListener('click', clearCredentials);
-    els.standardPlayerInput.addEventListener('change', () => {
-      setStandardPlayerEnabled(els.standardPlayerInput.checked);
-      updateEngineSupport();
-      // Restart whatever is playing so the change takes effect right away.
-      if (state.mode === 'engine' || state.mode === 'standard') refreshCurrent();
-    });
     const standardReady = () => {
       if (state.mode !== 'standard') return;
       hideOverlay();
@@ -2834,7 +2848,6 @@
 
   function boot() {
     bindEvents();
-    els.standardPlayerInput.checked = useStandardPlayer();
     updateEngineSupport();
     updateBookmarksButton();
 

@@ -125,6 +125,12 @@ input:focus-visible {
   color: var(--text);
 }
 
+.brand-mark {
+  display: none;
+  width: 30px;
+  height: 30px;
+}
+
 .appbar-actions {
   display: flex;
   flex: none;
@@ -1331,13 +1337,6 @@ body.modal-open::before {
   accent-color: var(--accent);
 }
 
-.form-hint {
-  margin: -8px 0 18px;
-  color: var(--muted);
-  font-size: 12.5px;
-  line-height: 1.5;
-}
-
 .form-error {
   margin: 0 0 16px;
   padding: 11px 13px;
@@ -1433,6 +1432,13 @@ body.modal-open::before {
 }
 
 @media (max-width: 560px) {
+  /* A phone shows the same desktop layout in a much smaller space. The scale
+     is set to 1 for now: the tap targets are grown below so they stay
+     comfortable without it. */
+  html {
+    zoom: 1;
+  }
+
   :root {
     --card-width: 100%;
     --shelf-width: 100%;
@@ -1459,6 +1465,37 @@ body.modal-open::before {
 
   .watch-bar {
     gap: 8px;
+  }
+
+  /* The wordmark takes a third of a phone screen; the icon alone is enough
+     and the search box gets the room. */
+  .brand-logo {
+    display: none;
+  }
+
+  .brand-mark {
+    display: block;
+  }
+
+  .appbar {
+    min-height: 72px;
+    gap: 10px;
+  }
+
+  .appbar .icon-button {
+    width: 56px;
+    height: 56px;
+  }
+
+  .watch-bar .text-button {
+    min-height: 52px;
+  }
+
+  /* The back button is a different class, so it needs the same treatment:
+     52 layout px is 42 points under the 0.8 scale. */
+  .watch-bar .back-button {
+    min-height: 52px;
+    min-width: 62px;
   }
 
   .text-button {
@@ -1489,7 +1526,7 @@ body.modal-open::before {
 
 @media (min-width: 700px) and (max-width: 840px) {
   html {
-    zoom: 0.60;
+    zoom: 0.70;
   }
 
   .appbar {
@@ -1498,5 +1535,28 @@ body.modal-open::before {
 
   .search {
     max-width: 833px;
+  }
+
+  /* The picture runs corner to corner: no side padding on the watch view and
+     no rounded corners or ring around the frame. The controls and the text
+     below it keep their own margin so they are not glued to the edge. */
+  .watch {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .player-stage {
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .watch-bar {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .watch-info {
+    padding-left: 16px;
+    padding-right: 16px;
   }
 }
