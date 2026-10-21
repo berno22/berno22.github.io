@@ -1616,6 +1616,13 @@
       return;
     }
 
+    // A live stream is only published as HLS here. Browsers without native
+    // HLS support (Chrome) need the engine for those.
+    if (!source.vod && !els.standardVideo.canPlayType('application/vnd.apple.mpegurl')) {
+      showPlaybackError('Live streams need the Tesla Engine in this browser.');
+      return;
+    }
+
     state.mode = 'standard';
     state.streamUrl = source.url;
     state.engineSource = null;
@@ -1647,15 +1654,19 @@
     playMedia(els.standardVideo);
     state.standardFallback = source.fallback || null;
     // Some browsers will not show a video-only stream at all. If the picture
-    // has not moved by now, switch to the muxed file, which carries its own
-    // sound and plays everywhere.
+    // is still not running by now, switch to the muxed file, which carries
+    // its own sound and plays everywhere. The wait is generous: the 1080p
+    // stream can take several seconds to start, and dropping to the muxed
+    // file while it is on its way would cost the picture its resolution.
     if (source.fallback) {
       window.clearTimeout(state.standardFallbackTimer);
       state.standardFallbackTimer = window.setTimeout(() => {
         if (state.mode !== 'standard') return;
         if (els.standardVideo.currentTime > 0) return;
+        // Data is already arriving, so the picture is on its way.
+        if (els.standardVideo.readyState >= 2) return;
         useStandardFallback();
-      }, 3500);
+      }, 12000);
     }
     els.engineBadge.textContent = '';
     els.engineBadge.hidden = true;
@@ -2689,7 +2700,7 @@
     const standardReady = () => {
       if (state.mode !== 'standard') return;
       hideOverlay();
-      if (els.standardVideo.currentTime > 0) {
+      if (els.standardVideo.currentTime > 0 || els.standardVideo.readyState >= 2) {
         window.clearTimeout(state.standardFallbackTimer);
         state.standardFallbackTimer = 0;
       }
