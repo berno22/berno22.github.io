@@ -1431,6 +1431,20 @@ body.modal-open::before {
   }
 }
 
+/* iOS Safari gets the icon-only brand at every phone orientation, even when
+   Safari reports a wider layout viewport. Other browsers keep the wordmark. */
+@media (hover: none) and (pointer: coarse) and (max-width: 960px) {
+  @supports (-webkit-touch-callout: none) {
+    .brand-logo {
+      display: none;
+    }
+
+    .brand-mark {
+      display: block;
+    }
+  }
+}
+
 @media (max-width: 560px) {
   /* A phone shows the same desktop layout in a much smaller space. 0.8 fits
      roughly a quarter more of the page on screen; the tap targets below are
@@ -1477,22 +1491,23 @@ body.modal-open::before {
 
   .brand-mark {
     display: block;
-    width: 36px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
   }
 
   .appbar {
-    min-height: 72px;
-    gap: 10px;
+    min-height: 64px;
+    gap: 8px;
+    padding: max(6px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 6px max(10px, env(safe-area-inset-left));
   }
 
   .appbar .icon-button {
-    width: 56px;
-    height: 56px;
+    width: 54px;
+    height: 54px;
   }
 
   .search {
-    height: 56px;
+    height: 54px;
   }
 
   .watch-bar .text-button {
