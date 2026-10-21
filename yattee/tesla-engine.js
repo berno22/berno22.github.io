@@ -148,6 +148,17 @@
     '    this.ch = [new Float32Array(this.cap), new Float32Array(this.cap)];',
     '    this.w = 0; this.r = 0; this.avail = 0; this.pos = 0;',
     '    this.underruns = 0; this.fed = false; this.tick = 0;',
+    // Pitch-preserving time stretch. A plain resample at 1.5x would play the
+    // sound a fifth too high; overlap-add keeps the pitch and only shortens
+    // the content.
+    '    this.stretch = 1;',
+    '    this.olaN = 1024; this.olaHa = 512;',
+    '    this.accL = new Float32Array(this.olaN);',
+    '    this.accR = new Float32Array(this.olaN);',
+    '    this.accW = new Float32Array(this.olaN);',
+    '    this.olaWin = new Float32Array(this.olaN);',
+    '    for (let k = 0; k < this.olaN; k++) this.olaWin[k] = 0.5 - 0.5 * Math.cos(2 * Math.PI * k / this.olaN);',
+    '    this.olaFill = 0; this.olaPos = 0; this.wsValid = false;',
     // The stream's rate is not always the device's. nasa.4k.us is 32kHz and
     // the AudioContext is 48kHz, so reading one source sample per output sample
     // drains the ring 1.5x too fast and it starves continuously - a permanent
@@ -166,6 +177,7 @@
     // measures the new channel rather than inheriting the old one's.
     '      if (d && d.flush) { this.w = 0; this.r = 0; this.avail = 0; this.pos = 0; this.fed = false; return; }',
     '      if (d && d.trim) { this.trim = d.trim; return; }',
+    '      if (d && d.stretch) { this.stretch = d.stretch; this.accL.fill(0); this.accR.fill(0); this.accW.fill(0); this.olaFill = 0; this.olaPos = 0; this.wsValid = false; this.wsBias = 0; return; }',
     // A new channel may arrive at a different rate. Re-step and empty, because
     // the existing contents are in the old rate's timeline.
     '      if (d && d.rate) {',
@@ -192,6 +204,98 @@
     '      this.avail += n; this.fed = true;',
     '    };',
     '  }',
+    // Overlap-add time stretch. The analysis hop runs faster than the',
+    '  // synthesis hop, so the content plays faster while the pitch stays put.',
+    '  stretchBlock(out, n) {',
+    // Time stretch by overlap-add. The analysis hop in the source is fixed',
+    '    // and the synthesis hop in the output is shorter: that is the speed',
+    '    // up, and the frames are placed without resampling so the pitch',
+    '    // stays where it was.',
+    '    const N = this.olaN, Ha = this.olaHa;',
+    // The source advances step*stretch samples per output sample, so the
+    // synthesis hop is the analysis hop divided by that.
+    '    const Hs = Math.max(1, Math.round(Ha / (this.step * this.stretch * this.trim)));',
+    '    const L = this.ch[0], R = this.ch[1];',
+    '    const cap = this.cap;',
+    '    const D = 128, W = 512;',
+    '    let done = 0;',
+    '    let starved = false;',
+    '    while (done < n) {',
+    '      if (this.olaFill === 0) {',
+    '        if (this.avail < Ha + N + D) { starved = true; break; }',
+    '        let pos = this.pos + Ha;',
+    '        if (this.wsValid) {',
+    // WSOLA: the analysis position is chosen so the new frame continues',
+    '          // the previous one smoothly. Without this search the overlap-add',
+    '          // cancels the signal and the sound turns to interference.',
+    '          const ref = this.pos + Hs;',
+    // The search lands on a similar offset every frame, and that offset',
+    '          // would otherwise make the media run faster than asked for. The',
+    '          // running mean of it is folded back into the nominal position so',
+    '          // the average hop stays exact.',
+    '          const bias = this.wsBias || 0;',
+    '          const nominal = this.pos + Ha - bias;',
+    '          let bestScore = -1e30, best = 0;',
+    '          for (let d = -D; d <= D; d += 4) {',
+    '            const p = nominal + d;',
+    '            let score = 0;',
+    '            for (let i = 0; i < W; i += 2) {',
+    '              const q0 = ref + i, qi = q0 | 0, qf = q0 - qi;',
+    '              const qa = qi % cap, qb = (qi + 1) % cap;',
+    '              const s0 = p + i, si = s0 | 0, sf = s0 - si;',
+    '              const sa = si % cap, sb = (si + 1) % cap;',
+    '              score += (L[qa] + (L[qb] - L[qa]) * qf) * (L[sa] + (L[sb] - L[sa]) * sf);',
+    '            }',
+    '            if (score > bestScore) { bestScore = score; best = d; }',
+    '          }',
+    '          pos = nominal + best;',
+    '          let nb = bias * 0.8 + best * 0.2;',
+    '          if (nb > D) nb = D; else if (nb < -D) nb = -D;',
+    '          this.wsBias = nb;',
+    '        }',
+    '        for (let k = 0; k < N; k++) {',
+    '          const w = this.olaWin[k];',
+    '          const p0 = pos + k, i0 = p0 | 0, f = p0 - i0;',
+    '          const a0 = i0 % cap, a1 = (i0 + 1) % cap;',
+    '          this.accL[k] += (L[a0] + (L[a1] - L[a0]) * f) * w;',
+    '          this.accR[k] += (R[a0] + (R[a1] - R[a0]) * f) * w;',
+    // The window sum is normalised out, so the level does not wobble with
+    // the overlap.
+    '          this.accW[k] += w;',
+    '        }',
+    '        this.avail -= (pos - this.pos);',
+    '        this.pos = pos;',
+    '        this.wsValid = true;',
+    '        this.olaFill = Hs;',
+    '        this.olaPos = 0;',
+    '      }',
+    '      const take = Math.min(n - done, this.olaFill);',
+    '      for (let i = 0; i < take; i++) {',
+    '        const k = this.olaPos + i;',
+    '        const g = this.accW[k] > 1e-4 ? 1 / this.accW[k] : 0;',
+    '        const l = this.accL[k] * g;',
+    '        out[0][done + i] = l;',
+    '        if (out.length > 1) out[1][done + i] = this.accR[k] * g;',
+    '        if (out.length > 2) for (let c = 2; c < out.length; c++) out[c][done + i] = l;',
+    '        this.sum = (this.sum || 0) + l * l;',
+    '        this.count = (this.count || 0) + 1;',
+    '        if (this.count >= 2048) { this.rms = Math.sqrt(this.sum / this.count); this.count = 0; this.sum = 0; }',
+    '      }',
+    '      done += take;',
+    '      this.olaPos += take;',
+    '      this.olaFill -= take;',
+    '      if (this.olaPos > 0) {',
+    '        this.accL.copyWithin(0, this.olaPos);',
+    '        this.accR.copyWithin(0, this.olaPos);',
+    '        this.accW.copyWithin(0, this.olaPos);',
+    '        this.accL.fill(0, N - this.olaPos);',
+    '        this.accR.fill(0, N - this.olaPos);',
+    '        this.accW.fill(0, N - this.olaPos);',
+    '        this.olaPos = 0;',
+    '      }',
+    '    }',
+    '    return starved;',
+    '  }',
     '  process(inputs, outputs) {',
     '    const out = outputs[0];',
     '    if (!out || !out.length) return true;',
@@ -202,6 +306,19 @@
     // pointer inside the per-channel loop consumed 2 samples per output frame on
     // a stereo stream, so the ring drained at exactly double rate, always ran
     // dry, and gave the right channel the wrong samples.
+    '    if (this.stretch !== 1) {',
+    '      const starved2 = this.stretchBlock(out, n);',
+    '      if (starved2) starved = true;',
+    '      this.tick++;',
+    '      if (starved && this.fed) {',
+    '        this.underruns++;',
+    '        if (this.tick > 8) { this.tick = 0; this.port.postMessage({ starved: 1, underruns: this.underruns }); }',
+    '      } else if (this.tick >= 8) {',
+    '        this.tick = 0;',
+    '        this.port.postMessage({ depth: this.avail / this.srcRate, rms: this.rms || 0 });',
+    '      }',
+    '      return true;',
+    '    }',
     '    const st = this.step * this.trim;',
     '    for (let i = 0; i < n; i++) {',
     '      let l = 0, r = 0;',
@@ -378,6 +495,9 @@
       kind: (meta && meta.type) || 'hls',
       vod: !!(meta && meta.vod),
       startSec: (meta && Number(meta.startSec)) || 0,
+      // The playback rate the caller wants, so a reopened stream keeps it.
+      // 1 is normal; 1.5 compresses the media clock so the picture runs faster.
+      rate: (meta && Number(meta.rate) > 0) ? Number(meta.rate) : 1,
       // Content-time position at which this pipeline actually starts. For an
       // MP4 seek it is the keyframe the sidx contained, which can precede the
       // requested time by one subsegment.
@@ -1569,8 +1689,14 @@
     // that is still filling is legitimately empty, not "audio is early".
     s.aDepth = s.aDepth ? s.aDepth * 0.85 + a.depth * 0.15 : a.depth;
     var f = (s.aDepth - AUDIO_LEAD_S) * TRIM_GAIN;
-    if (f > TRIM_MAX) f = TRIM_MAX; else if (f < -TRIM_MAX) f = -TRIM_MAX;
+    // After a rate change the sound sits a fraction behind the picture and the
+    // 2% trim would take half a minute to close that. The stretched path
+    // keeps the pitch, so a bigger catch-up trim is safe there.
+    var cap = (s.aTrimCapUntil && now < s.aTrimCapUntil) ? (s.aTrimCap || TRIM_MAX) : TRIM_MAX;
+    if (f > cap) f = cap; else if (f < -cap) f = -cap;
     if (Math.abs(f) < TRIM_DEADBAND) f = 0;
+    // The stretch carries the playback rate; the trim is only the small
+    // drift correction on top of it.
     this.setAudioTrim(s, 1 + f, now);
   };
 
@@ -1665,7 +1791,7 @@
       var p = s.prePend.shift();
       var rel = p.sec - s.vBaseSec;
       if (rel > s.mediaEnd) s.mediaEnd = rel;
-      s.pend.push({ sync: p.sync, ts: Math.round(rel * 1e6), due: s.vT0 + rel * 1000, raw: p.raw });
+      s.pend.push({ sync: p.sync, ts: Math.round(rel * 1e6), due: s.vT0 + rel * 1000 / (s.rate || 1), raw: p.raw });
     }
     while (s.pend.length > s.caps.v) { s.pend.shift(); s.dropsPre++; }
   };
@@ -1702,7 +1828,7 @@
         }
         var rel = sec - s.vBaseSec;
         if (rel > s.mediaEnd) s.mediaEnd = rel;
-        s.pend.push({ sync: sync, ts: Math.round(rel * 1e6), due: s.vT0 + rel * 1000, raw: raw });
+        s.pend.push({ sync: sync, ts: Math.round(rel * 1e6), due: s.vT0 + rel * 1000 / (s.rate || 1), raw: raw });
       } else if (s.aTrack && s.adec && id === s.aTrack.id) {
         // Audio gets its own queue, paced on the same media clock. Sharing the
         // video queue lets audio evict video - AAC frames outnumber video ~2:1 -
@@ -1832,8 +1958,12 @@
       // anchor so this queue lines up with the video due times instead of
       // playing seconds ahead or behind when the two renditions joined at
       // slightly different segment boundaries.
-      var aOff = s.vT0 - (s.vBaseSec >= 0 ? s.vBaseSec : 0) * 1000;
-      var aDue = function (x) { return aOff + x.ts / 1000; };
+      // The release pace follows the playback rate. At 1.5x the sound has to
+      // leave the queue sooner, or the ring drains faster than the decoder
+      // refills it and the audio starves.
+      var aBaseSec = s.vBaseSec >= 0 ? s.vBaseSec : 0;
+      var aRate = s.rate || 1;
+      var aDue = function (x) { return s.vT0 + (x.ts / 1000 - aBaseSec * 1000) / aRate; };
       // A VOD seek resumes the picture at a video keyframe and the sound at its
       // own subsegment boundary; those are not aligned. Audio subsegments are
       // ~10s and video ones ~3-7s, so the audio pre-roll can start seconds
@@ -1873,7 +2003,7 @@
     if (s.stopped) { try { frame.close(); } catch (e) {} return; }
     s.frames++;
     var sec = (frame.timestamp || 0) / 1e6;
-    var due = s.vT0 >= 0 ? s.vT0 + sec * 1000 : 0;
+    var due = s.vT0 >= 0 ? s.vT0 + sec * 1000 / (s.rate || 1) : 0;
     // A short queue, not a single slot. The decoder runs slightly ahead of the
     // wall clock, so the NEWEST frame is always a few ms in the future; keeping
     // only that one meant every paint check found "not due yet" and nothing was
@@ -2137,6 +2267,61 @@
     return true;
   };
 
+  // Change the playback rate. The queued work is remapped so the picture does
+  // not jump, and the clock is re-anchored so the position stays continuous
+  // across the change.
+  TeslaPlayer.prototype.setRate = function (r) {
+    var rate = Number(r);
+    if (!isFinite(rate) || rate <= 0) return false;
+    if (rate > 4) rate = 4;
+    this.rate = rate;
+    var s = this.live;
+    if (!s) return true;
+    var oldRate = s.rate || 1;
+    if (Math.abs(oldRate - rate) < 0.001) return true;
+
+    var now = Date.now();
+    var oldV0 = s.vT0;
+    var pos = 0;
+    if (s.vod) {
+      pos = Math.max(0, s.playStartSec + (oldV0 >= 0 ? (now - oldV0) / 1000 * oldRate : 0));
+    }
+    s.rate = rate;
+    if (oldV0 >= 0) {
+      // Re-anchor the clock against the new rate so the position does not
+      // jump, and stretch the queued work to match.
+      var newV0 = now - (pos - s.playStartSec) * 1000 / rate;
+      var scale = oldRate / rate;
+      for (var i = 0; i < s.pend.length; i++) {
+        if (typeof s.pend[i].due === 'number') s.pend[i].due = newV0 + (s.pend[i].due - oldV0) * scale;
+      }
+      for (var j = 0; j < s.fq.length; j++) {
+        if (typeof s.fq[j].due === 'number') s.fq[j].due = newV0 + (s.fq[j].due - oldV0) * scale;
+      }
+      s.vT0 = newV0;
+    }
+    // The audio ring reads the source at the new rate from now on, and the
+    // worklet needs to know so it stretches instead of resampling.
+    s.aTrim = 0;
+    s.lastTrimAt = 0;
+    if (rate !== 1) {
+      // Let the sound catch up with the picture for a few seconds.
+      s.aTrimCap = 0.12;
+      s.aTrimCapUntil = now + 6000;
+    } else {
+      s.aTrimCap = 0;
+      s.aTrimCapUntil = 0;
+    }
+    try { this.audio.setTrim(rate); } catch (e) {}
+    try {
+      if (this.audio.node && this.audio.node.port) {
+        this.audio.node.port.postMessage({ stretch: rate });
+      }
+    } catch (e) {}
+    this.emit('state', this.state());
+    return true;
+  };
+
   // Tear the persistent audio graph down. Only needed when leaving Drive mode
   // for good - a channel switch must NOT do this, or every switch would rebuild
   // the whole chain and re-register the processor name.
@@ -2167,7 +2352,7 @@
     var position = 0;
     if (s.vod) {
       var elapsed = s.vT0 >= 0 ? (clockNow(s) - s.vT0) / 1000 : 0;
-      position = Math.max(0, s.playStartSec + elapsed);
+      position = Math.max(0, s.playStartSec + elapsed * (s.rate || 1));
       // While the pipeline re-opens after a seek there is no media clock yet,
       // so the position would read 0 and the next seek would jump backwards.
       // Report the requested position until the new pipeline has its own.
@@ -2195,6 +2380,7 @@
       aFirstRel: s.aFirstRel,
       audioPath: this.audio.path, modErr: this.audio.modErr,
       muted: this.muted,
+      rate: s.rate || 1,
       ctxState: this.actx ? this.actx.state : 'none',
       aFrames: s.aFrames, aSeconds: s.aSeconds, aUnder: this.audio.underruns,
       aQueue: this.audio.depth, aRms: this.audio.rms,

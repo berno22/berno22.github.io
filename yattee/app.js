@@ -4,8 +4,25 @@
   const STORAGE_KEY = 'yattee-tesla.connection.v1';
   const BOOKMARK_KEY = 'yattee-tesla.bookmarks.v1';
   const BOOKMARK_CACHE_PREFIX = 'yattee-tesla.bookmarks.v2:';
+  const STANDARD_PLAYER_KEY = 'yattee-tesla.standard-player.v1';
   const BOOKMARK_LIMIT = 100;
   const DEFAULT_SERVER = 'https://yattee.vpmbd45g3cfj.opentunnel.xyz';
+
+  // The standard player is a per-browser preference only: it is never sent
+  // to the server. Absent means off.
+  function useStandardPlayer() {
+    try {
+      return localStorage.getItem(STANDARD_PLAYER_KEY) === '1';
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function setStandardPlayerEnabled(on) {
+    try {
+      localStorage.setItem(STANDARD_PLAYER_KEY, on ? '1' : '0');
+    } catch (err) {}
+  }
 
   const els = {
     homeBtn: document.getElementById('homeBtn'),
@@ -32,8 +49,13 @@
     refreshBtn: document.getElementById('refreshBtn'),
     muteBtn: document.getElementById('muteBtn'),
     repeatBtn: document.getElementById('repeatBtn'),
+    speedBtn: document.getElementById('speedBtn'),
+    speedLabel: document.getElementById('speedLabel'),
     playerStage: document.getElementById('playerStage'),
     playerCanvas: document.getElementById('playerCanvas'),
+    standardVideo: document.getElementById('standardVideo'),
+    standardAudio: document.getElementById('standardAudio'),
+    standardPlayerInput: document.getElementById('standardPlayerInput'),
     playerOverlay: document.getElementById('playerOverlay'),
     overlayText: document.getElementById('overlayText'),
     engineBadge: document.getElementById('engineBadge'),
@@ -89,6 +111,7 @@
     engineReady: false,
     engineFailed: false,
     muted: false,
+    speed: 1,
     repeat: false,
     loadingMore: false,
     engineSource: null,
@@ -444,6 +467,13 @@
   function updateEngineSupport() {
     state.engineReady = engineIsReady();
     els.engineSupport.replaceChildren();
+
+    if (useStandardPlayer()) {
+      // The standard player does not need the engine at all.
+      els.engineSupport.hidden = true;
+      els.engineSupport.classList.remove('ok', 'warn');
+      return;
+    }
 
     if (state.engineReady) {
       els.engineSupport.hidden = true;
@@ -1492,8 +1522,125 @@
     return null;
   }
 
+  // A progressive MP4 through the relay opens in any browser; live streams
+  // only have HLS, which a standard player can use when the browser supports
+  // it natively.
+  function chooseStandardSource(data) {
+    if (!data) return null;
+    const live = !!data.liveNow;
+    const formats = (Array.isArray(data.formatStreams) ? data.formatStreams : [])
+      .filter((format) => format && format.url)
+      .map((format) => ({ format, height: formatHeight(format), kind: formatKind(format) }))
+      .filter((entry) => entry.kind);
+    if (!live) {
+      // YouTube only publishes 1080p as a video-only stream, so a single
+      // element would cap out at the muxed 360p/720p file. Take the high
+      // quality picture and play the audio from a second element instead.
+      const muxed = pickEngineFormat(formats.filter((entry) => entry.kind === 'mp4'), 1080);
+      const adaptiveVideo = pickAdaptiveVideo(data.adaptiveFormats, 1080);
+      const adaptiveAudio = pickAdaptiveAudio(data.adaptiveFormats);
+      if (adaptiveVideo && adaptiveAudio && (!muxed || adaptiveVideo.height > muxed.height)) {
+        return {
+          url: relayMediaUrl(resolveUrl(adaptiveVideo.url)),
+          audioUrl: relayMediaUrl(resolveUrl(adaptiveAudio.url)),
+          vod: true,
+          height: adaptiveVideo.height
+        };
+      }
+      if (muxed) return { url: relayMediaUrl(resolveUrl(muxed.format.url)), vod: true };
+    }
+    const hlsUrl = data.hlsUrl ? resolveUrl(data.hlsUrl) : '';
+    if (hlsUrl) return { url: hlsUrl, vod: false };
+    const hls = pickEngineFormat(formats.filter((entry) => entry.kind === 'hls'), 1080);
+    if (hls) return { url: resolveUrl(hls.format.url), vod: false };
+    return null;
+  }
+
+  function startStandardPlayer(data, session) {
+    if (session !== state.playToken) return;
+    const source = chooseStandardSource(data);
+    if (!source) {
+      showPlaybackError('The server returned no stream this player can open.');
+      return;
+    }
+
+    state.mode = 'standard';
+    state.streamUrl = source.url;
+    state.engineSource = null;
+    state.engineFailed = false;
+    state.timelineDuration = source.vod ? (Number(data.lengthSeconds) || 0) : 0;
+    state.timelinePosition = 0;
+    state.timelinePreview = null;
+    state.timelineSeekable = false;
+    state.timelinePaused = false;
+    hideTimeline();
+    els.timelinePlayBtn.classList.remove('paused');
+    els.playerCanvas.hidden = true;
+    els.standardVideo.hidden = false;
+    els.standardVideo.controls = true;
+    els.standardVideo.muted = !!state.muted;
+    els.standardVideo.volume = 1;
+    els.standardVideo.src = source.url;
+    // A second element carries the audio when the picture comes from a
+    // video-only stream, so the sound still matches the picture.
+    if (source.audioUrl) {
+      els.standardAudio.hidden = false;
+      els.standardAudio.src = source.audioUrl;
+      els.standardAudio.muted = !!state.muted;
+      els.standardAudio.volume = els.standardVideo.volume;
+      try {
+        const played = els.standardAudio.play();
+        if (played && played.catch) played.catch(() => {});
+      } catch (err) {}
+    } else {
+      els.standardAudio.hidden = true;
+    }
+    try {
+      const played = els.standardVideo.play();
+      if (played && played.catch) played.catch(() => {});
+    } catch (err) {}
+    els.engineBadge.textContent = '';
+    els.engineBadge.hidden = true;
+    els.muteBtn.hidden = false;
+    // A native video loops on its own, so repeat works here as well.
+    els.repeatBtn.hidden = !source.vod;
+    els.standardVideo.loop = !!state.repeat;
+    els.speedBtn.hidden = !source.vod;
+    els.standardVideo.playbackRate = state.speed;
+    if (els.standardAudio) els.standardAudio.playbackRate = state.speed;
+    updateMuteButton();
+    updateRepeatButton();
+    updateSpeedButton();
+  }
+
+  function stopStandardPlayer() {
+    const video = els.standardVideo;
+    if (!video) return;
+    try {
+      video.pause();
+    } catch (err) {}
+    try {
+      video.removeAttribute('src');
+      video.load();
+    } catch (err) {}
+    video.hidden = true;
+    const audio = els.standardAudio;
+    if (audio) {
+      try {
+        audio.pause();
+        audio.removeAttribute('src');
+        audio.load();
+      } catch (err) {}
+      audio.hidden = true;
+    }
+  }
+
   function playVideoData(data, session) {
     if (session !== state.playToken) return;
+    if (useStandardPlayer()) {
+      startStandardPlayer(data, session);
+      return;
+    }
     if (!state.engineReady) {
       showPlaybackError('Tesla Engine is unavailable. This build needs HTTPS and WebCodecs for all playback.');
       return;
@@ -1518,14 +1665,27 @@
     state.mode = 'engine';
     state.streamUrl = url;
     state.engineSource = source;
+    if (state.speed !== 1) {
+      // If the browser cannot take the sound (a live stream has no separate
+      // audio track to hand it), the engine keeps its own.
+      if (!startEngineAudio(data) && state.engine) {
+        try {
+          state.engine.setMuted(!!state.muted);
+        } catch (err) {}
+      }
+    } else {
+      stopEngineAudio();
+    }
     state.engineFailed = false;
     els.playerCanvas.hidden = false;
     els.engineBadge.textContent = '';
     els.engineBadge.hidden = true;
     els.muteBtn.hidden = false;
     els.repeatBtn.hidden = !source.vod;
+    els.speedBtn.hidden = !source.vod;
     updateMuteButton();
     updateRepeatButton();
+    updateSpeedButton();
     state.timelineDuration = source.vod ? (Number(data.lengthSeconds) || 0) : 0;
     state.timelinePosition = 0;
     state.timelinePreview = null;
@@ -1540,6 +1700,7 @@
         name: data.title || '',
         type: source.kind,
         vod: source.vod,
+        rate: state.speed,
         maxHeight: source.maxHeight || 1080,
         pickedHeight: source.height || 0,
         audioUrl: source.audioUrl || '',
@@ -1565,6 +1726,7 @@
 
   function stopPlayer() {
     cancelReconnect();
+    stopEngineAudio();
     state.mode = null;
     state.engineFailed = false;
     state.engineSource = null;
@@ -1575,10 +1737,12 @@
       } catch (err) {}
     }
 
+    stopStandardPlayer();
     els.playerCanvas.hidden = false;
     els.engineBadge.hidden = true;
     els.muteBtn.hidden = true;
     els.repeatBtn.hidden = true;
+    els.speedBtn.hidden = true;
     hideTimeline();
     hideOverlay();
   }
@@ -1864,12 +2028,173 @@
     els.repeatBtn.setAttribute('aria-pressed', state.repeat ? 'true' : 'false');
   }
 
+  const SPEED_STEPS = [1, 1.5];
+  const SPEED_KEY = 'yattee-tesla.speed.v1';
+
+  function storedSpeed() {
+    try {
+      return Number(localStorage.getItem(SPEED_KEY)) === 1.5 ? 1.5 : 1;
+    } catch (err) {
+      return 1;
+    }
+  }
+
+  function storeSpeed(rate) {
+    try {
+      localStorage.setItem(SPEED_KEY, rate === 1.5 ? '1.5' : '1');
+    } catch (err) {}
+  }
+
+  function updateSpeedButton() {
+    const rate = state.speed === 1.5 ? 1.5 : 1;
+    const label = rate === 1 ? '1x' : '1.5x';
+    els.speedLabel.textContent = label;
+    els.speedBtn.classList.toggle('active', rate !== 1);
+    els.speedBtn.setAttribute('aria-pressed', rate !== 1 ? 'true' : 'false');
+    els.speedBtn.setAttribute('aria-label', 'Playback speed ' + label);
+    els.speedBtn.title = 'Playback speed ' + label;
+  }
+
+  function applySpeed() {
+    if (state.engine) {
+      try {
+        state.engine.setRate(state.speed);
+      } catch (err) {}
+      if (state.speed !== 1) startEngineAudio(state.current);
+      else stopEngineAudio();
+    }
+    if (els.standardVideo) els.standardVideo.playbackRate = state.speed;
+    // The separate audio element has to run at the same rate as the picture.
+    if (els.standardAudio && state.mode !== 'engine') els.standardAudio.playbackRate = state.speed;
+    updateSpeedButton();
+  }
+
+  // At a rate other than 1x the engine's own stretcher is not clean enough,
+  // so the sound is taken from the browser instead: the same audio-only
+  // stream the standard player uses, played by a media element that
+  // time-stretches it properly. The engine keeps painting the picture and
+  // its own audio is muted, so the two never fight.
+  let engineAudio = null;
+
+  function startEngineAudio(data) {
+    const format = pickAdaptiveAudio(data && data.adaptiveFormats);
+    if (!format) return false;
+    const src = relayMediaUrl(resolveUrl(format.url));
+    const el = els.standardAudio;
+    el.hidden = false;
+    if (engineAudio && el.src !== src) {
+      // A different video: the sound has to follow it.
+      try {
+        el.pause();
+        el.src = src;
+        el.load();
+      } catch (err) {}
+    } else if (!engineAudio) {
+      el.src = src;
+    }
+    el.playbackRate = state.speed;
+    el.muted = !!state.muted;
+    try {
+      const played = el.play();
+      if (played && played.catch) played.catch(() => {});
+    } catch (err) {}
+    if (state.engine) {
+      try {
+        state.engine.setMuted(true);
+      } catch (err) {}
+    }
+    if (!engineAudio) engineAudio = { timer: window.setInterval(syncEngineAudio, 50) };
+    return true;
+  }
+
+  function stopEngineAudio() {
+    if (!engineAudio) return;
+    window.clearInterval(engineAudio.timer);
+    engineAudio = null;
+    try {
+      els.standardAudio.pause();
+      els.standardAudio.removeAttribute('src');
+      els.standardAudio.load();
+    } catch (err) {}
+    els.standardAudio.hidden = true;
+    if (state.engine) {
+      try {
+        state.engine.setMuted(!!state.muted);
+      } catch (err) {}
+    }
+  }
+
+  // Keep the browser's audio locked to the engine's picture.
+  function syncEngineAudio() {
+    if (!engineAudio || !state.engine) return;
+    let snapshot = null;
+    try {
+      snapshot = state.engine.state();
+    } catch (err) {
+      return;
+    }
+    if (!snapshot) return;
+    const audio = els.standardAudio;
+    if (!audio) return;
+    const pos = snapshot.position || 0;
+
+    // The transport follows the engine: pausing the video pauses the sound.
+    if (snapshot.paused && !audio.paused) {
+      try {
+        audio.pause();
+      } catch (err) {}
+      return;
+    }
+    if (!snapshot.paused && audio.paused) {
+      try {
+        const played = audio.play();
+        if (played && played.catch) played.catch(() => {});
+      } catch (err) {}
+      return;
+    }
+    if (audio.paused) return;
+    const dur = audio.duration || 0;
+    if (!dur) return;
+
+    // Two stages. A small offset is taken out with a gentle rate trim, which
+    // slides the sound onto the picture without the click a seek would make.
+    // Anything larger is corrected by a small seek, but only one at a time:
+    // seeking every tick restarts the element's pipeline and it falls over.
+    const drift = pos - audio.currentTime;
+    const now = Date.now();
+    if (Math.abs(drift) > 0.15 && now - (engineAudio.lastFix || 0) > 400) {
+      engineAudio.lastFix = now;
+      try {
+        audio.currentTime = Math.max(0, Math.min(pos, dur - 0.5));
+      } catch (err) {}
+      try {
+        audio.playbackRate = state.speed;
+      } catch (err) {}
+      return;
+    }
+    const trim = Math.max(-0.02, Math.min(0.02, drift * 0.8));
+    const want = state.speed * (1 + trim);
+    if (Math.abs(audio.playbackRate - want) > 0.001) {
+      try {
+        audio.playbackRate = want;
+      } catch (err) {}
+    }
+  }
+
+  function toggleSpeed() {
+    const index = SPEED_STEPS.indexOf(state.speed);
+    state.speed = SPEED_STEPS[(index + 1) % SPEED_STEPS.length] || 1;
+    storeSpeed(state.speed);
+    applySpeed();
+  }
+
   function toggleRepeat() {
     state.repeat = !state.repeat;
     updateRepeatButton();
     if (state.engine) {
       try { state.engine.setRepeat(state.repeat); } catch (err) {}
     }
+    if (els.standardVideo) els.standardVideo.loop = !!state.repeat;
   }
 
   function showLoading(text) {
@@ -1901,6 +2226,7 @@
     els.engineBadge.hidden = true;
     els.muteBtn.hidden = true;
     els.repeatBtn.hidden = true;
+    els.speedBtn.hidden = true;
     hideTimeline();
   }
 
@@ -1917,9 +2243,12 @@
     state.muted = !state.muted;
     if (state.engine) {
       try {
-        state.engine.setMuted(state.muted);
+        // While the browser is playing the sound, the engine stays muted.
+        state.engine.setMuted(engineAudio ? true : state.muted);
       } catch (err) {}
     }
+    if (els.standardVideo) els.standardVideo.muted = !!state.muted;
+    if (els.standardAudio) els.standardAudio.muted = !!state.muted;
     updateMuteButton();
   }
 
@@ -1949,6 +2278,7 @@
       fillSettingsForm(state.creds);
       showSettingsMessage('');
     }
+    els.standardPlayerInput.checked = useStandardPlayer();
     els.settingsModal.hidden = false;
     document.body.classList.add('modal-open');
     if (message) showSettingsMessage(message);
@@ -2471,6 +2801,62 @@
     els.closeSettingsBtn.addEventListener('click', closeSettings);
     els.settingsForm.addEventListener('submit', submitSettings);
     els.clearBtn.addEventListener('click', clearCredentials);
+    els.standardPlayerInput.addEventListener('change', () => {
+      setStandardPlayerEnabled(els.standardPlayerInput.checked);
+      updateEngineSupport();
+      // Restart whatever is playing so the change takes effect right away.
+      if (state.mode === 'engine' || state.mode === 'standard') refreshCurrent();
+    });
+    els.standardVideo.addEventListener('playing', () => {
+      if (state.mode !== 'standard') return;
+      hideOverlay();
+    });
+    // The picture and the separate audio track are two elements, so the
+    // audio follows the video: same transport, same position.
+    els.standardVideo.addEventListener('play', () => {
+      const audio = els.standardAudio;
+      if (!audio || !audio.src) return;
+      try {
+        const played = audio.play();
+        if (played && played.catch) played.catch(() => {});
+      } catch (err) {}
+    });
+    els.standardVideo.addEventListener('pause', () => {
+      const audio = els.standardAudio;
+      if (!audio || !audio.src) return;
+      try {
+        audio.pause();
+      } catch (err) {}
+    });
+    els.standardVideo.addEventListener('seeked', () => {
+      const audio = els.standardAudio;
+      if (!audio || !audio.src) return;
+      if (Math.abs(audio.currentTime - els.standardVideo.currentTime) > 0.2) {
+        try {
+          audio.currentTime = els.standardVideo.currentTime;
+        } catch (err) {}
+      }
+    });
+    els.standardVideo.addEventListener('timeupdate', () => {
+      const audio = els.standardAudio;
+      if (!audio || !audio.src || audio.paused) return;
+      const drift = els.standardVideo.currentTime - audio.currentTime;
+      if (Math.abs(drift) > 0.12) {
+        try {
+          audio.currentTime = els.standardVideo.currentTime;
+        } catch (err) {}
+      }
+    });
+    els.standardVideo.addEventListener('volumechange', () => {
+      const audio = els.standardAudio;
+      if (!audio || !audio.src) return;
+      audio.volume = els.standardVideo.volume;
+      audio.muted = els.standardVideo.muted;
+    });
+    els.standardVideo.addEventListener('error', () => {
+      if (state.mode !== 'standard') return;
+      showPlaybackError('The standard video player could not open this stream.');
+    });
     els.searchForm.addEventListener('submit', handleSearchSubmit);
     els.searchClear.addEventListener('click', () => {
       els.searchInput.value = '';
@@ -2507,6 +2893,7 @@
     els.refreshBtn.addEventListener('click', refreshCurrent);
     els.muteBtn.addEventListener('click', toggleMute);
     els.repeatBtn.addEventListener('click', toggleRepeat);
+    els.speedBtn.addEventListener('click', toggleSpeed);
     els.timelinePlayBtn.addEventListener('click', toggleTimelinePause);
     els.skipBackBtn.addEventListener('click', () => skipBy(-10));
     els.skipFwdBtn.addEventListener('click', () => skipBy(10));
@@ -2536,6 +2923,9 @@
 
   function boot() {
     bindEvents();
+    state.speed = storedSpeed();
+    updateSpeedButton();
+    els.standardPlayerInput.checked = useStandardPlayer();
     updateEngineSupport();
     updateBookmarksButton();
 

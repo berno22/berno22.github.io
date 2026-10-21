@@ -8,7 +8,7 @@
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob:; style-src 'self'; img-src 'self' data: https: http:; media-src 'self' blob: https: http:; connect-src 'self' https: http:; worker-src 'self' blob:; form-action 'self'; base-uri 'none'">
   <title>YouTube</title>
-  <link rel="stylesheet" href="styles.css?v=20261021f">
+  <link rel="stylesheet" href="styles.css?v=20261021i">
 </head>
 <body>
   <header class="appbar">
@@ -124,9 +124,14 @@
         </svg>
         <span class="repeat-one" aria-hidden="true">1</span>
       </button>
+      <button class="text-button speed-button" id="speedBtn" type="button" aria-label="Playback speed 1x" title="Playback speed 1x" aria-pressed="false" hidden>
+        <span class="speed-label" id="speedLabel">1x</span>
+      </button>
     </div>
 
     <div class="player-stage" id="playerStage">
+      <video id="standardVideo" class="standard-video" playsinline controls preload="none" hidden></video>
+      <audio id="standardAudio" preload="none" hidden></audio>
       <canvas id="playerCanvas" width="1280" height="720" aria-label="Video"></canvas>
       <div class="player-overlay" id="playerOverlay">
         <div class="spinner" aria-hidden="true"></div>
@@ -217,6 +222,12 @@
         <span>Keep credentials on this device</span>
       </label>
 
+      <label class="check-row">
+        <input id="standardPlayerInput" type="checkbox">
+        <span>Use standard video player</span>
+      </label>
+      <p class="form-hint" id="standardPlayerHint">Plays with the browser's own player instead of the Tesla Engine. Saved in this browser only.</p>
+
       <p class="form-error" id="settingsError" role="alert" hidden></p>
 
       <div class="engine-support" id="engineSupport" hidden></div>
@@ -251,7 +262,7 @@
 
   <script src="vendor/mux.min.js" defer></script>
   <script src="vendor/mp4box.all.min.js" defer></script>
-  <script src="tesla-engine.js?v=20261021a" defer></script>
-  <script src="app.js?v=20261020x" defer></script>
+  <script src="tesla-engine.js?v=20261021i" defer></script>
+  <script src="app.js?v=20261023d" defer></script>
 </body>
 </html>
