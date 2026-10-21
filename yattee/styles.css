@@ -721,16 +721,6 @@ input:focus-visible {
   display: block;
 }
 
-.speed-button {
-  min-width: 54px;
-}
-
-.speed-label {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
 
 #muteBtn svg {
   width: 21px;

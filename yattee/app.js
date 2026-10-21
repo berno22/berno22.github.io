@@ -49,8 +49,6 @@
     refreshBtn: document.getElementById('refreshBtn'),
     muteBtn: document.getElementById('muteBtn'),
     repeatBtn: document.getElementById('repeatBtn'),
-    speedBtn: document.getElementById('speedBtn'),
-    speedLabel: document.getElementById('speedLabel'),
     playerStage: document.getElementById('playerStage'),
     playerCanvas: document.getElementById('playerCanvas'),
     standardVideo: document.getElementById('standardVideo'),
@@ -111,12 +109,14 @@
     engineReady: false,
     engineFailed: false,
     muted: false,
-    speed: 1,
     repeat: false,
     loadingMore: false,
     engineSource: null,
     timelineHideTimer: 0,
     timelineLastTap: 0,
+    standardFallbackTimer: 0,
+    standardFallback: null,
+    standardRecovering: 0,
     timelineDragging: false,
     timelinePreview: null,
     timelinePreviewAt: 0,
@@ -542,6 +542,11 @@
   }
 
   function unlockEngine() {
+    // The standard player uses the browser's own media elements, so the
+    // engine is not created at all: no audio context, no decoder, nothing
+    // that needs WebCodecs. It is only built when the engine is actually
+    // asked for.
+    if (useStandardPlayer()) return;
     const player = getEngine();
     if (!player) return;
     try {
@@ -1539,12 +1544,16 @@
       const muxed = pickEngineFormat(formats.filter((entry) => entry.kind === 'mp4'), 1080);
       const adaptiveVideo = pickAdaptiveVideo(data.adaptiveFormats, 1080);
       const adaptiveAudio = pickAdaptiveAudio(data.adaptiveFormats);
+      const muxedUrl = muxed ? relayMediaUrl(resolveUrl(muxed.format.url)) : '';
       if (adaptiveVideo && adaptiveAudio && (!muxed || adaptiveVideo.height > muxed.height)) {
         return {
           url: relayMediaUrl(resolveUrl(adaptiveVideo.url)),
           audioUrl: relayMediaUrl(resolveUrl(adaptiveAudio.url)),
           vod: true,
-          height: adaptiveVideo.height
+          height: adaptiveVideo.height,
+          // The muxed file carries its own sound, so it is the fallback when
+          // the browser will not show the video-only stream.
+          fallback: muxedUrl ? { url: muxedUrl, audioUrl: '' } : null
         };
       }
       if (muxed) return { url: relayMediaUrl(resolveUrl(muxed.format.url)), vod: true };
@@ -1554,6 +1563,49 @@
     const hls = pickEngineFormat(formats.filter((entry) => entry.kind === 'hls'), 1080);
     if (hls) return { url: resolveUrl(hls.format.url), vod: false };
     return null;
+  }
+
+  // Autoplay with sound is refused unless the browser sees a fresh gesture,
+  // and Safari applies that to the picture element as well. A muted element
+  // is always allowed to start, and the sound comes from the other element
+  // anyway, so fall back to muted rather than leaving a black frame.
+  // Fall back to the muxed file: it carries its own sound, so the separate
+  // audio element is not needed and the picture is one that every browser
+  // will show.
+  function useStandardFallback() {
+    const fallback = state.standardFallback;
+    if (!fallback) return false;
+    state.standardFallback = null;
+    // The old source reports its failure again while the new one loads.
+    state.standardRecovering = Date.now();
+    window.clearTimeout(state.standardFallbackTimer);
+    state.standardFallbackTimer = 0;
+    try {
+      els.standardAudio.pause();
+      els.standardAudio.removeAttribute('src');
+      els.standardAudio.load();
+      els.standardAudio.hidden = true;
+    } catch (err) {}
+    els.standardVideo.muted = !!state.muted;
+    els.standardVideo.src = fallback.url;
+    playMedia(els.standardVideo);
+    return true;
+  }
+
+  function playMedia(element) {
+    if (!element) return;
+    try {
+      const played = element.play();
+      if (played && played.catch) {
+        played.catch(() => {
+          try {
+            element.muted = true;
+            const again = element.play();
+            if (again && again.catch) again.catch(() => {});
+          } catch (err) {}
+        });
+      }
+    } catch (err) {}
   }
 
   function startStandardPlayer(data, session) {
@@ -1588,34 +1640,39 @@
       els.standardAudio.src = source.audioUrl;
       els.standardAudio.muted = !!state.muted;
       els.standardAudio.volume = els.standardVideo.volume;
-      try {
-        const played = els.standardAudio.play();
-        if (played && played.catch) played.catch(() => {});
-      } catch (err) {}
+      playMedia(els.standardAudio);
     } else {
       els.standardAudio.hidden = true;
     }
-    try {
-      const played = els.standardVideo.play();
-      if (played && played.catch) played.catch(() => {});
-    } catch (err) {}
+    playMedia(els.standardVideo);
+    state.standardFallback = source.fallback || null;
+    // Some browsers will not show a video-only stream at all. If the picture
+    // has not moved by now, switch to the muxed file, which carries its own
+    // sound and plays everywhere.
+    if (source.fallback) {
+      window.clearTimeout(state.standardFallbackTimer);
+      state.standardFallbackTimer = window.setTimeout(() => {
+        if (state.mode !== 'standard') return;
+        if (els.standardVideo.currentTime > 0) return;
+        useStandardFallback();
+      }, 3500);
+    }
     els.engineBadge.textContent = '';
     els.engineBadge.hidden = true;
     els.muteBtn.hidden = false;
     // A native video loops on its own, so repeat works here as well.
     els.repeatBtn.hidden = !source.vod;
     els.standardVideo.loop = !!state.repeat;
-    els.speedBtn.hidden = !source.vod;
-    els.standardVideo.playbackRate = state.speed;
-    if (els.standardAudio) els.standardAudio.playbackRate = state.speed;
     updateMuteButton();
     updateRepeatButton();
-    updateSpeedButton();
   }
 
   function stopStandardPlayer() {
     const video = els.standardVideo;
     if (!video) return;
+    window.clearTimeout(state.standardFallbackTimer);
+    state.standardFallbackTimer = 0;
+    state.standardFallback = null;
     try {
       video.pause();
     } catch (err) {}
@@ -1665,27 +1722,14 @@
     state.mode = 'engine';
     state.streamUrl = url;
     state.engineSource = source;
-    if (state.speed !== 1) {
-      // If the browser cannot take the sound (a live stream has no separate
-      // audio track to hand it), the engine keeps its own.
-      if (!startEngineAudio(data) && state.engine) {
-        try {
-          state.engine.setMuted(!!state.muted);
-        } catch (err) {}
-      }
-    } else {
-      stopEngineAudio();
-    }
     state.engineFailed = false;
     els.playerCanvas.hidden = false;
     els.engineBadge.textContent = '';
     els.engineBadge.hidden = true;
     els.muteBtn.hidden = false;
     els.repeatBtn.hidden = !source.vod;
-    els.speedBtn.hidden = !source.vod;
     updateMuteButton();
     updateRepeatButton();
-    updateSpeedButton();
     state.timelineDuration = source.vod ? (Number(data.lengthSeconds) || 0) : 0;
     state.timelinePosition = 0;
     state.timelinePreview = null;
@@ -1700,7 +1744,6 @@
         name: data.title || '',
         type: source.kind,
         vod: source.vod,
-        rate: state.speed,
         maxHeight: source.maxHeight || 1080,
         pickedHeight: source.height || 0,
         audioUrl: source.audioUrl || '',
@@ -1726,7 +1769,6 @@
 
   function stopPlayer() {
     cancelReconnect();
-    stopEngineAudio();
     state.mode = null;
     state.engineFailed = false;
     state.engineSource = null;
@@ -1742,7 +1784,6 @@
     els.engineBadge.hidden = true;
     els.muteBtn.hidden = true;
     els.repeatBtn.hidden = true;
-    els.speedBtn.hidden = true;
     hideTimeline();
     hideOverlay();
   }
@@ -2028,166 +2069,6 @@
     els.repeatBtn.setAttribute('aria-pressed', state.repeat ? 'true' : 'false');
   }
 
-  const SPEED_STEPS = [1, 1.5];
-  const SPEED_KEY = 'yattee-tesla.speed.v1';
-
-  function storedSpeed() {
-    try {
-      return Number(localStorage.getItem(SPEED_KEY)) === 1.5 ? 1.5 : 1;
-    } catch (err) {
-      return 1;
-    }
-  }
-
-  function storeSpeed(rate) {
-    try {
-      localStorage.setItem(SPEED_KEY, rate === 1.5 ? '1.5' : '1');
-    } catch (err) {}
-  }
-
-  function updateSpeedButton() {
-    const rate = state.speed === 1.5 ? 1.5 : 1;
-    const label = rate === 1 ? '1x' : '1.5x';
-    els.speedLabel.textContent = label;
-    els.speedBtn.classList.toggle('active', rate !== 1);
-    els.speedBtn.setAttribute('aria-pressed', rate !== 1 ? 'true' : 'false');
-    els.speedBtn.setAttribute('aria-label', 'Playback speed ' + label);
-    els.speedBtn.title = 'Playback speed ' + label;
-  }
-
-  function applySpeed() {
-    if (state.engine) {
-      try {
-        state.engine.setRate(state.speed);
-      } catch (err) {}
-      if (state.speed !== 1) startEngineAudio(state.current);
-      else stopEngineAudio();
-    }
-    if (els.standardVideo) els.standardVideo.playbackRate = state.speed;
-    // The separate audio element has to run at the same rate as the picture.
-    if (els.standardAudio && state.mode !== 'engine') els.standardAudio.playbackRate = state.speed;
-    updateSpeedButton();
-  }
-
-  // At a rate other than 1x the engine's own stretcher is not clean enough,
-  // so the sound is taken from the browser instead: the same audio-only
-  // stream the standard player uses, played by a media element that
-  // time-stretches it properly. The engine keeps painting the picture and
-  // its own audio is muted, so the two never fight.
-  let engineAudio = null;
-
-  function startEngineAudio(data) {
-    const format = pickAdaptiveAudio(data && data.adaptiveFormats);
-    if (!format) return false;
-    const src = relayMediaUrl(resolveUrl(format.url));
-    const el = els.standardAudio;
-    el.hidden = false;
-    if (engineAudio && el.src !== src) {
-      // A different video: the sound has to follow it.
-      try {
-        el.pause();
-        el.src = src;
-        el.load();
-      } catch (err) {}
-    } else if (!engineAudio) {
-      el.src = src;
-    }
-    el.playbackRate = state.speed;
-    el.muted = !!state.muted;
-    try {
-      const played = el.play();
-      if (played && played.catch) played.catch(() => {});
-    } catch (err) {}
-    if (state.engine) {
-      try {
-        state.engine.setMuted(true);
-      } catch (err) {}
-    }
-    if (!engineAudio) engineAudio = { timer: window.setInterval(syncEngineAudio, 50) };
-    return true;
-  }
-
-  function stopEngineAudio() {
-    if (!engineAudio) return;
-    window.clearInterval(engineAudio.timer);
-    engineAudio = null;
-    try {
-      els.standardAudio.pause();
-      els.standardAudio.removeAttribute('src');
-      els.standardAudio.load();
-    } catch (err) {}
-    els.standardAudio.hidden = true;
-    if (state.engine) {
-      try {
-        state.engine.setMuted(!!state.muted);
-      } catch (err) {}
-    }
-  }
-
-  // Keep the browser's audio locked to the engine's picture.
-  function syncEngineAudio() {
-    if (!engineAudio || !state.engine) return;
-    let snapshot = null;
-    try {
-      snapshot = state.engine.state();
-    } catch (err) {
-      return;
-    }
-    if (!snapshot) return;
-    const audio = els.standardAudio;
-    if (!audio) return;
-    const pos = snapshot.position || 0;
-
-    // The transport follows the engine: pausing the video pauses the sound.
-    if (snapshot.paused && !audio.paused) {
-      try {
-        audio.pause();
-      } catch (err) {}
-      return;
-    }
-    if (!snapshot.paused && audio.paused) {
-      try {
-        const played = audio.play();
-        if (played && played.catch) played.catch(() => {});
-      } catch (err) {}
-      return;
-    }
-    if (audio.paused) return;
-    const dur = audio.duration || 0;
-    if (!dur) return;
-
-    // Two stages. A small offset is taken out with a gentle rate trim, which
-    // slides the sound onto the picture without the click a seek would make.
-    // Anything larger is corrected by a small seek, but only one at a time:
-    // seeking every tick restarts the element's pipeline and it falls over.
-    const drift = pos - audio.currentTime;
-    const now = Date.now();
-    if (Math.abs(drift) > 0.15 && now - (engineAudio.lastFix || 0) > 400) {
-      engineAudio.lastFix = now;
-      try {
-        audio.currentTime = Math.max(0, Math.min(pos, dur - 0.5));
-      } catch (err) {}
-      try {
-        audio.playbackRate = state.speed;
-      } catch (err) {}
-      return;
-    }
-    const trim = Math.max(-0.02, Math.min(0.02, drift * 0.8));
-    const want = state.speed * (1 + trim);
-    if (Math.abs(audio.playbackRate - want) > 0.001) {
-      try {
-        audio.playbackRate = want;
-      } catch (err) {}
-    }
-  }
-
-  function toggleSpeed() {
-    const index = SPEED_STEPS.indexOf(state.speed);
-    state.speed = SPEED_STEPS[(index + 1) % SPEED_STEPS.length] || 1;
-    storeSpeed(state.speed);
-    applySpeed();
-  }
-
   function toggleRepeat() {
     state.repeat = !state.repeat;
     updateRepeatButton();
@@ -2226,7 +2107,6 @@
     els.engineBadge.hidden = true;
     els.muteBtn.hidden = true;
     els.repeatBtn.hidden = true;
-    els.speedBtn.hidden = true;
     hideTimeline();
   }
 
@@ -2243,8 +2123,7 @@
     state.muted = !state.muted;
     if (state.engine) {
       try {
-        // While the browser is playing the sound, the engine stays muted.
-        state.engine.setMuted(engineAudio ? true : state.muted);
+        state.engine.setMuted(state.muted);
       } catch (err) {}
     }
     if (els.standardVideo) els.standardVideo.muted = !!state.muted;
@@ -2807,9 +2686,30 @@
       // Restart whatever is playing so the change takes effect right away.
       if (state.mode === 'engine' || state.mode === 'standard') refreshCurrent();
     });
-    els.standardVideo.addEventListener('playing', () => {
+    const standardReady = () => {
       if (state.mode !== 'standard') return;
       hideOverlay();
+      if (els.standardVideo.currentTime > 0) {
+        window.clearTimeout(state.standardFallbackTimer);
+        state.standardFallbackTimer = 0;
+      }
+    };
+    els.standardVideo.addEventListener('playing', standardReady);
+    els.standardVideo.addEventListener('loadeddata', standardReady);
+    els.standardVideo.addEventListener('timeupdate', standardReady);
+    // Safari can refuse to start the picture at all. A tap on the frame is a
+    // fresh gesture, so the play is worth another try.
+    els.standardVideo.addEventListener('error', () => {
+      if (state.mode !== 'standard') return;
+      // A browser that will not show the video-only stream gets the muxed
+      // one before the player gives up.
+      if (useStandardFallback()) return;
+      // The source that just failed may report again while the replacement
+      // is still loading; that is not a failure of the player. Only complain
+      // when the picture really is not coming.
+      if (els.standardVideo.currentTime > 0 || els.standardVideo.readyState >= 2) return;
+      if (Date.now() - (state.standardRecovering || 0) < 5000) return;
+      showPlaybackError('The standard video player could not open this stream.');
     });
     // The picture and the separate audio track are two elements, so the
     // audio follows the video: same transport, same position.
@@ -2853,10 +2753,6 @@
       audio.volume = els.standardVideo.volume;
       audio.muted = els.standardVideo.muted;
     });
-    els.standardVideo.addEventListener('error', () => {
-      if (state.mode !== 'standard') return;
-      showPlaybackError('The standard video player could not open this stream.');
-    });
     els.searchForm.addEventListener('submit', handleSearchSubmit);
     els.searchClear.addEventListener('click', () => {
       els.searchInput.value = '';
@@ -2893,7 +2789,6 @@
     els.refreshBtn.addEventListener('click', refreshCurrent);
     els.muteBtn.addEventListener('click', toggleMute);
     els.repeatBtn.addEventListener('click', toggleRepeat);
-    els.speedBtn.addEventListener('click', toggleSpeed);
     els.timelinePlayBtn.addEventListener('click', toggleTimelinePause);
     els.skipBackBtn.addEventListener('click', () => skipBy(-10));
     els.skipFwdBtn.addEventListener('click', () => skipBy(10));
@@ -2912,6 +2807,11 @@
       // idle time: an explicit tap always gets the full dwell.
       state.timelineLastTap = Date.now();
       revealTimeline();
+      // A tap is a fresh gesture, so a picture the browser refused to start
+      // gets another chance.
+      if (state.mode === 'standard' && els.standardVideo.paused) {
+        playMedia(els.standardVideo);
+      }
     });
     els.playerStage.addEventListener('pointerleave', () => {
       if (state.timelineDragging) return;
@@ -2923,8 +2823,6 @@
 
   function boot() {
     bindEvents();
-    state.speed = storedSpeed();
-    updateSpeedButton();
     els.standardPlayerInput.checked = useStandardPlayer();
     updateEngineSupport();
     updateBookmarksButton();
