@@ -108,6 +108,7 @@
     timelineHideTimer: 0,
     timelineLastTap: 0,
     standardFallbackTimer: 0,
+    standardStartTimer: 0,
     standardFallback: null,
     standardRecovering: 0,
     standardDirect: false,
@@ -1305,6 +1306,7 @@
       state.current = data;
       renderWatchInfo(data, fallback);
       syncBookmarkButton();
+      updateBookmarkMetadata(data);
       playVideoData(data, session);
     } catch (err) {
       if (session !== state.playToken || !err || err.name === 'AbortError') return;
@@ -1352,6 +1354,7 @@
       state.current = data;
       renderWatchInfo(data, null);
       syncBookmarkButton();
+      updateBookmarkMetadata(data);
       playVideoData(data, session);
     } catch (err) {
       if (session !== state.playToken || !err || err.name === 'AbortError') return;
@@ -1614,6 +1617,8 @@
     state.standardRecovering = Date.now();
     window.clearTimeout(state.standardFallbackTimer);
     state.standardFallbackTimer = 0;
+    window.clearTimeout(state.standardStartTimer);
+    state.standardStartTimer = 0;
     try {
       els.standardAudio.pause();
       els.standardAudio.removeAttribute('src');
@@ -1667,6 +1672,61 @@
     } catch (err) {}
   }
 
+  // The picture and the sound are separate media elements, and WebKit can
+  // start one noticeably before the other. Pull the audio back onto the
+  // video's clock whenever they drift apart, including while it buffers.
+  function syncStandardAudio() {
+    const video = els.standardVideo;
+    const audio = els.standardAudio;
+    if (state.mode !== 'standard' || !audio || !audio.src) return;
+    if (video.readyState < 1 || audio.readyState < 1 || video.paused) return;
+    if (audio.paused || audio.seeking) return;
+    const drift = video.currentTime - audio.currentTime;
+    if (Math.abs(drift) > 0.1) {
+      try {
+        audio.currentTime = video.currentTime;
+      } catch (err) {}
+    }
+  }
+
+  function startStandardAudio() {
+    const video = els.standardVideo;
+    const audio = els.standardAudio;
+    if (state.mode !== 'standard' || !audio || !audio.src) return;
+    // Never let the sound run ahead of the picture: the video file can sit
+    // in the loading state for a few seconds on Safari while the audio-only
+    // file is ready much sooner.
+    if (video.paused || video.readyState < 2) return;
+    if (audio.readyState >= 1 && Math.abs(audio.currentTime - video.currentTime) > 0.1) {
+      try {
+        audio.currentTime = video.currentTime;
+      } catch (err) {}
+    }
+    if (audio.paused) playMedia(audio);
+  }
+
+  // Safari starts the two files on independent pipelines, so starting them
+  // one at a time always produces a visible/audible offset. Wait until both
+  // have data, then issue both play calls in the same step.
+  function startStandardPair(session) {
+    if (session !== state.playToken || state.mode !== 'standard') return;
+    const video = els.standardVideo;
+    const audio = els.standardAudio;
+    const wantsAudio = !!(audio && audio.src);
+    if (video.readyState < 2) return;
+    if (wantsAudio && audio.readyState < 2) return;
+    if (!video.paused || video.currentTime > 0) return;
+    window.clearTimeout(state.standardStartTimer);
+    state.standardStartTimer = 0;
+    if (wantsAudio) {
+      try {
+        audio.currentTime = video.currentTime;
+      } catch (err) {}
+    }
+    playMedia(video);
+    if (wantsAudio) playMedia(audio);
+  }
+
   function startStandardPlayer(data, session) {
     if (session !== state.playToken) return;
     const source = chooseStandardSource(data);
@@ -1698,20 +1758,32 @@
     els.standardVideo.controls = true;
     els.standardVideo.muted = !!state.muted;
     els.standardVideo.volume = 1;
+    els.standardVideo.preload = 'auto';
     els.standardVideo.src = source.url;
+    els.standardVideo.load();
+    window.clearTimeout(state.standardStartTimer);
+    state.standardStartTimer = 0;
     // A second element carries the audio when the picture comes from a
     // video-only stream, so the sound still matches the picture.
     if (source.audioUrl) {
       els.standardAudio.hidden = false;
+      // Load the sound in parallel, but start neither file on its own: the
+      // pair starts together in startStandardPair.
+      els.standardAudio.preload = 'auto';
       els.standardAudio.src = source.audioUrl;
+      els.standardAudio.load();
       els.standardAudio.muted = !!state.muted;
       els.standardAudio.volume = els.standardVideo.volume;
-      playMedia(els.standardAudio);
+      state.standardStartTimer = window.setTimeout(() => {
+        if (state.mode !== 'standard' || !els.standardVideo.paused) return;
+        if (useStandardFallback()) return;
+        showPlaybackError('The video and audio could not start together.');
+      }, 9000);
     } else {
       els.standardAudio.hidden = true;
     }
-    playMedia(els.standardVideo);
     state.standardFallback = source.fallback || null;
+    if (!source.audioUrl) playMedia(els.standardVideo);
     // Some browsers will not show a video-only stream at all. If the picture
     // is still not running by now, switch to the muxed file, which carries
     // its own sound and plays everywhere. The wait is generous: the 1080p
@@ -1750,6 +1822,8 @@
     if (!video) return;
     window.clearTimeout(state.standardFallbackTimer);
     state.standardFallbackTimer = 0;
+    window.clearTimeout(state.standardStartTimer);
+    state.standardStartTimer = 0;
     state.standardFallback = null;
     try {
       video.pause();
@@ -2206,6 +2280,9 @@
     }
     if (els.standardVideo) els.standardVideo.muted = !!state.muted;
     if (els.standardAudio) els.standardAudio.muted = !!state.muted;
+    // Unmuting is a fresh gesture: give a sound track the browser refused
+    // to autoplay another chance, at the picture's current position.
+    if (state.mode === 'standard') startStandardAudio();
     updateMuteButton();
   }
 
@@ -2308,7 +2385,7 @@
     closeSettings();
     leaveWatch();
     updateBookmarksButton();
-    syncBookmarks();
+    syncBookmarks().then(() => refreshLiveBookmarks());
     showToast('Connected to ' + draft.base.replace(/^https?:\/\//, ''));
     loadTrending();
     window.scrollTo(0, 0);
@@ -2457,6 +2534,89 @@
       }
       return fetchBookmarksFromServer();
     });
+  }
+
+  // A bookmark keeps the metadata it had when it was saved, so a stream that
+  // was live yesterday keeps its LIVE badge forever. Fold in the fresh
+  // details whenever we already have them.
+  function mergeBookmarkVideo(item, data) {
+    let changed = false;
+    if (typeof data.liveNow === 'boolean' && item.liveNow !== data.liveNow) {
+      item.liveNow = data.liveNow;
+      changed = true;
+    }
+    // A live stream's length keeps growing, so only freeze it once the
+    // broadcast has ended and the duration means something.
+    const length = Number(data.lengthSeconds);
+    if (!data.liveNow && length && length !== Number(item.lengthSeconds)) {
+      item.lengthSeconds = length;
+      changed = true;
+    }
+    return changed;
+  }
+
+  function publishBookmarkRefresh(changed) {
+    if (!changed) return false;
+    state.bookmarkRevision += 1;
+    updateBookmarksButton();
+    if (state.browseMode === 'bookmarks' && !els.browseView.hidden) {
+      state.results = readBookmarks();
+      setNotice(state.results.length ? '' : 'No bookmarks yet. Open a video and tap the bookmark button.');
+      renderResults();
+    }
+    queueBookmarkTask(pushBookmarksToServer);
+    return true;
+  }
+
+  function updateBookmarkMetadata(data) {
+    const id = data && data.videoId;
+    if (!id) return false;
+    const items = readBookmarks();
+    const item = items.find((entry) => entry.videoId === id);
+    if (!item || !mergeBookmarkVideo(item, data)) return false;
+    if (!writeBookmarks(items)) return false;
+    return publishBookmarkRefresh(true);
+  }
+
+  let liveBookmarkRefreshAt = 0;
+  let liveBookmarkRefreshTask = null;
+
+  async function refreshLiveBookmarks() {
+    if (!state.creds) return false;
+    if (liveBookmarkRefreshTask) return liveBookmarkRefreshTask;
+    if (Date.now() - liveBookmarkRefreshAt < 5 * 60 * 1000) return false;
+    const live = readBookmarks().filter((item) => item.liveNow);
+    if (!live.length) return false;
+    liveBookmarkRefreshAt = Date.now();
+    liveBookmarkRefreshTask = (async () => {
+      const fresh = new Map();
+      await Promise.all(
+        live.map(async (item) => {
+          try {
+            const data = await api(
+              '/api/v1/videos/' + encodeURIComponent(item.videoId) + '?proxy=false'
+            );
+            if (data && typeof data === 'object' && typeof data.liveNow === 'boolean') {
+              fresh.set(item.videoId, data);
+            }
+          } catch (err) {}
+        })
+      );
+      if (!fresh.size) return false;
+      const items = readBookmarks();
+      let changed = false;
+      for (const item of items) {
+        const data = fresh.get(item.videoId);
+        if (data && mergeBookmarkVideo(item, data)) changed = true;
+      }
+      if (!changed || !writeBookmarks(items)) return false;
+      return publishBookmarkRefresh(true);
+    })();
+    try {
+      return await liveBookmarkRefreshTask;
+    } finally {
+      liveBookmarkRefreshTask = null;
+    }
   }
 
   const LONG_PRESS_MS = 600;
@@ -2681,6 +2841,7 @@
       state.results = readBookmarks();
       setNotice(state.results.length ? '' : 'No bookmarks yet. Open a video and tap the bookmark button.');
       renderResults();
+      refreshLiveBookmarks();
     });
   }
 
@@ -2768,6 +2929,11 @@
     els.standardVideo.addEventListener('playing', standardReady);
     els.standardVideo.addEventListener('loadeddata', standardReady);
     els.standardVideo.addEventListener('timeupdate', standardReady);
+    const startPair = () => startStandardPair(state.playToken);
+    els.standardVideo.addEventListener('canplay', startPair);
+    els.standardVideo.addEventListener('loadeddata', startPair);
+    els.standardAudio.addEventListener('canplay', startPair);
+    els.standardAudio.addEventListener('loadeddata', startPair);
     // Safari can refuse to start the picture at all. A tap on the frame is a
     // fresh gesture, so the play is worth another try.
     const failStandard = () => {
@@ -2800,12 +2966,24 @@
     // The picture and the separate audio track are two elements, so the
     // audio follows the video: same transport, same position.
     els.standardVideo.addEventListener('play', () => {
+      startStandardAudio();
+    });
+    els.standardVideo.addEventListener('playing', () => {
+      startStandardAudio();
+      syncStandardAudio();
+    });
+    els.standardVideo.addEventListener('waiting', () => {
       const audio = els.standardAudio;
       if (!audio || !audio.src) return;
       try {
-        const played = audio.play();
-        if (played && played.catch) played.catch(() => {});
+        audio.pause();
       } catch (err) {}
+    });
+    els.standardAudio.addEventListener('playing', () => {
+      syncStandardAudio();
+    });
+    els.standardAudio.addEventListener('canplay', () => {
+      if (!els.standardVideo.paused) startStandardAudio();
     });
     els.standardVideo.addEventListener('pause', () => {
       const audio = els.standardAudio;
@@ -2815,23 +2993,10 @@
       } catch (err) {}
     });
     els.standardVideo.addEventListener('seeked', () => {
-      const audio = els.standardAudio;
-      if (!audio || !audio.src) return;
-      if (Math.abs(audio.currentTime - els.standardVideo.currentTime) > 0.2) {
-        try {
-          audio.currentTime = els.standardVideo.currentTime;
-        } catch (err) {}
-      }
+      syncStandardAudio();
     });
     els.standardVideo.addEventListener('timeupdate', () => {
-      const audio = els.standardAudio;
-      if (!audio || !audio.src || audio.paused) return;
-      const drift = els.standardVideo.currentTime - audio.currentTime;
-      if (Math.abs(drift) > 0.12) {
-        try {
-          audio.currentTime = els.standardVideo.currentTime;
-        } catch (err) {}
-      }
+      syncStandardAudio();
     });
     els.standardVideo.addEventListener('volumechange', () => {
       const audio = els.standardAudio;
@@ -2931,7 +3096,7 @@
     }
 
     updateBookmarksButton();
-    syncBookmarks();
+    syncBookmarks().then(() => refreshLiveBookmarks());
     loadTrending();
   }
 
