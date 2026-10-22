@@ -751,7 +751,7 @@
         name: (state.current && state.current.title) || '',
         type: source.kind,
         vod: source.vod,
-        maxHeight: source.maxHeight || 1080,
+        maxHeight: source.maxHeight || MAX_VIDEO_HEIGHT,
         pickedHeight: source.height || 0,
         audioUrl: source.audioUrl || '',
         durationHint: source.vod && state.current
@@ -1327,10 +1327,9 @@
     openWatchShell(fallback, id);
 
     // Safari's native player does far better with the direct googlevideo
-    // files: the relay tunnel is the slow part of the path, and a 1080p
-    // stream needs more headroom than it has. Direct URLs work while the
-    // phone shares the server's public address; the relay is the fallback
-    // for everywhere else (see retryStandardThroughRelay).
+    // files: the relay tunnel is the slow part of the path. Direct URLs work
+    // while the phone shares the server's public address; the relay is the
+    // fallback for everywhere else (see retryStandardThroughRelay).
     const standard = useStandardPlayer();
     state.standardDirect = standard;
     const proxyQuery = standard ? 'proxy=false' : 'proxy=true&proxy_mode=relay';
@@ -1462,12 +1461,13 @@
     return '';
   }
 
-  // The relay is the bottleneck for Chrome, and 1080p sits too close to its
-  // delivered bitrate. 720p leaves enough headroom to ride out the dips.
-  const ENGINE_MAX_HEIGHT = 720;
+  // Every browser is capped at 720p. The relay cannot sustain 1080p for the
+  // Chrome engine, and using the same ceiling on Safari keeps playback
+  // consistent and leaves headroom to ride out relay dips.
+  const MAX_VIDEO_HEIGHT = 720;
 
   function pickEngineFormat(list, maxHeight) {
-    const cap = maxHeight || 1080;
+    const cap = maxHeight || MAX_VIDEO_HEIGHT;
     const usable = list.filter((entry) => entry && entry.format);
     const underCap = usable
       .filter((entry) => entry.height > 0 && entry.height <= cap)
@@ -1482,7 +1482,7 @@
   // exists here. Prefer H.264 at the highest rendition (the Tesla browser
   // decodes avc1 everywhere) and pair it with the best MP4 audio file.
   function pickAdaptiveVideo(list, maxHeight) {
-    const cap = maxHeight || 1080;
+    const cap = maxHeight || MAX_VIDEO_HEIGHT;
     const usable = (Array.isArray(list) ? list : []).filter((format) => {
       if (!format || !format.url) return false;
       const type = String(format.type || format.mimeType || '').toLowerCase();
@@ -1578,17 +1578,17 @@
     const mp4Formats = formats.filter((entry) => entry.kind === 'mp4');
 
     if (live) {
-      if (hlsUrl) return { url: hlsUrl, kind: 'hls', vod: false, maxHeight: ENGINE_MAX_HEIGHT };
-      const hls = pickEngineFormat(hlsFormats, ENGINE_MAX_HEIGHT);
-      return hls ? { url: resolveUrl(hls.format.url), kind: 'hls', vod: false, maxHeight: ENGINE_MAX_HEIGHT } : null;
+      if (hlsUrl) return { url: hlsUrl, kind: 'hls', vod: false, maxHeight: MAX_VIDEO_HEIGHT };
+      const hls = pickEngineFormat(hlsFormats, MAX_VIDEO_HEIGHT);
+      return hls ? { url: resolveUrl(hls.format.url), kind: 'hls', vod: false, maxHeight: MAX_VIDEO_HEIGHT } : null;
     }
 
-    if (hlsUrl) return { url: hlsUrl, kind: 'hls', vod: true, maxHeight: ENGINE_MAX_HEIGHT };
+    if (hlsUrl) return { url: hlsUrl, kind: 'hls', vod: true, maxHeight: MAX_VIDEO_HEIGHT };
     // Dual-source VOD: when the adaptive ladder has a rendition above what the
     // muxed list can offer, play the video-only file and feed the audio-only
     // file on the engine's separate audio path.
-    const muxed = pickEngineFormat(mp4Formats, ENGINE_MAX_HEIGHT);
-    const adaptiveVideo = pickAdaptiveVideo(data.adaptiveFormats, ENGINE_MAX_HEIGHT);
+    const muxed = pickEngineFormat(mp4Formats, MAX_VIDEO_HEIGHT);
+    const adaptiveVideo = pickAdaptiveVideo(data.adaptiveFormats, MAX_VIDEO_HEIGHT);
     const adaptiveAudio = pickAdaptiveAudio(data.adaptiveFormats);
     if (adaptiveVideo && adaptiveAudio) {
       const adaptiveHeight = formatHeight(adaptiveVideo);
@@ -1598,14 +1598,14 @@
           audioUrl: relayMediaUrl(resolveUrl(adaptiveAudio.url)),
           kind: 'mp4',
           vod: true,
-          maxHeight: ENGINE_MAX_HEIGHT,
+          maxHeight: MAX_VIDEO_HEIGHT,
           height: adaptiveHeight
         };
       }
     }
-    if (muxed) return { url: relayMediaUrl(resolveUrl(muxed.format.url)), kind: 'mp4', vod: true, maxHeight: ENGINE_MAX_HEIGHT };
-    const hls = pickEngineFormat(hlsFormats, ENGINE_MAX_HEIGHT);
-    if (hls) return { url: resolveUrl(hls.format.url), kind: 'hls', vod: true, maxHeight: ENGINE_MAX_HEIGHT };
+    if (muxed) return { url: relayMediaUrl(resolveUrl(muxed.format.url)), kind: 'mp4', vod: true, maxHeight: MAX_VIDEO_HEIGHT };
+    const hls = pickEngineFormat(hlsFormats, MAX_VIDEO_HEIGHT);
+    if (hls) return { url: resolveUrl(hls.format.url), kind: 'hls', vod: true, maxHeight: MAX_VIDEO_HEIGHT };
     return null;
   }
 
@@ -1620,11 +1620,11 @@
       .map((format) => ({ format, height: formatHeight(format), kind: formatKind(format) }))
       .filter((entry) => entry.kind);
     if (!live) {
-      // YouTube only publishes 1080p as a video-only stream, so a single
-      // element would cap out at the muxed 360p/720p file. Take the high
-      // quality picture and play the audio from a second element instead.
-      const muxed = pickEngineFormat(formats.filter((entry) => entry.kind === 'mp4'), 1080);
-      const adaptiveVideo = pickAdaptiveVideo(data.adaptiveFormats, 1080);
+      // YouTube only publishes high-quality video as a video-only stream, so
+      // a single element would cap out at the muxed 360p/720p file. Take the
+      // 720p picture and play the audio from a second element instead.
+      const muxed = pickEngineFormat(formats.filter((entry) => entry.kind === 'mp4'), MAX_VIDEO_HEIGHT);
+      const adaptiveVideo = pickAdaptiveVideo(data.adaptiveFormats, MAX_VIDEO_HEIGHT);
       const adaptiveAudio = pickAdaptiveAudio(data.adaptiveFormats);
       const muxedUrl = muxed ? relayMediaUrl(resolveUrl(muxed.format.url)) : '';
       if (adaptiveVideo && adaptiveAudio && (!muxed || adaptiveVideo.height > muxed.height)) {
@@ -1642,7 +1642,7 @@
     }
     const hlsUrl = data.hlsUrl ? resolveUrl(data.hlsUrl) : '';
     if (hlsUrl) return { url: hlsUrl, vod: false };
-    const hls = pickEngineFormat(formats.filter((entry) => entry.kind === 'hls'), 1080);
+    const hls = pickEngineFormat(formats.filter((entry) => entry.kind === 'hls'), MAX_VIDEO_HEIGHT);
     if (hls) return { url: resolveUrl(hls.format.url), vod: false };
     return null;
   }
@@ -1831,7 +1831,7 @@
     if (!source.audioUrl) playMedia(els.standardVideo);
     // Some browsers will not show a video-only stream at all. If the picture
     // is still not running by now, switch to the muxed file, which carries
-    // its own sound and plays everywhere. The wait is generous: the 1080p
+    // its own sound and plays everywhere. The wait is generous: the video-only
     // stream can take several seconds to start, and dropping to the muxed
     // file while it is on its way would cost the picture its resolution.
     if (source.fallback) {
@@ -1941,7 +1941,7 @@
         name: data.title || '',
         type: source.kind,
         vod: source.vod,
-        maxHeight: source.maxHeight || 1080,
+        maxHeight: source.maxHeight || MAX_VIDEO_HEIGHT,
         pickedHeight: source.height || 0,
         audioUrl: source.audioUrl || '',
         durationHint: source.vod ? (Number(data.lengthSeconds) || 0) : 0
