@@ -403,7 +403,7 @@
       vdec: null, adec: null, ctl: null, aCtl: null, mp4Done: false,
       duration: (meta && meta.vod ? (Number(meta.durationHint) || 0) : 0),
       audioUrl: (meta && meta.audioUrl) || '', aStarted: false, aMux: null, aMbox: null, aFilePos: 0,
-      aInitFed: false, aSegs: [], aCursor: 0, aBase: '', aPlaylistUrl: '',
+      aInitFed: false, aSegs: [], aCursor: 0, aBase: '', aPlaylistUrl: '', vStartKey: '',
       aLastUrl: null, aPushedKeys: null, aPumpRunning: false, aSegDur: 5,
       aMediaEnd: 0, aSegsFetched: 0, aLastQueuedTs: null,
       fq: [], pend: [], aPend: [], prePend: [], preStart: 0, preLastSec: 0,
@@ -489,6 +489,7 @@
       // re-fetch of a segment already pushed. A VOD seek starts at the segment
       // that contains the requested time instead.
       s.cursor = s.vod ? segmentAt(s.segs, s.startSec) : Math.max(0, s.segs.length - 2);
+      s.vStartKey = s.segs[s.cursor] ? segKey(s.segs[s.cursor].url) : '';
       if (s.vod) {
         s.playStartSec = 0;
         for (var i = 0; i < s.cursor; i++) s.playStartSec += s.segs[i].dur;
@@ -846,7 +847,13 @@
       if (!p.segs.length) throw new Error('no segments in audio playlist');
       s.aSegs = p.segs;
       s.aSegDur = p.segs[0].dur;
-      s.aCursor = s.vod ? segmentAt(p.segs, s.startSec) : Math.max(0, p.segs.length - 2);
+      var start = -1;
+      if (!s.vod && s.vStartKey) {
+        for (var i = 0; i < p.segs.length; i++) {
+          if (segKey(p.segs[i].url) === s.vStartKey) { start = i; break; }
+        }
+      }
+      s.aCursor = s.vod ? segmentAt(p.segs, s.startSec) : (start >= 0 ? start : Math.max(0, p.segs.length - 2));
       self.pumpAudio(s, gen);
     }).catch(function (e) {
       if (s.stopped || self.gen !== gen) return;
@@ -1877,6 +1884,11 @@
         s.aPrimed = true;
       }
       while (s.aPend.length && aDue(s.aPend[0]) < now - 500) { s.aPend.shift(); s.aSkips++; }
+      // The worklet plays the head of the ring as soon as it is pushed, so
+      // priming it with a future sample starts the sound ahead of the picture.
+      // Wait until the first sample is actually due; the live playlists are
+      // fetched independently and can join one segment apart.
+      if (s.aFirstRel === null && s.aPend.length && aDue(s.aPend[0]) > now) return;
       while (s.aPend.length && aDue(s.aPend[0]) - now < AUDIO_LEAD_MS) {
         if (s.adec.decodeQueueSize > 40) break;
         var a = s.aPend.shift();
@@ -2015,13 +2027,18 @@
     // painted in bunches with gaps between them - a visible stutter at exactly
     // one segment duration. Measured as 148 duplicate-timestamp frames per 20s.
   var segKey = function (u) {
-    var m = /v-(\d+)\.ts/.exec(u || '');
+    var s = u || '';
+    // The relay wraps the upstream URL in ?url=...; signatures and expiry in
+    // the outer URL change on every fetch, and the /sq/ path lives inside.
+    var q = /[?&]url=([^&]+)/.exec(s);
+    if (q) { try { s = decodeURIComponent(q[1]); } catch (e) {} }
+    var m = /v-(\d+)\.ts/.exec(s);
     if (m) return m[1];
     // googlevideo HLS puts the playlist sequence number in the segment URL:
     // /sq/2817/.../seg.ts. Match on that, not on the whole signed URL (the
     // signature and host rotate between playlist fetches).
-    var sq = /\/sq\/(\d+)(?:\/|$)/.exec(u || '');
-    return sq ? 'sq' + sq[1] : (u || '');
+    var sq = /\/sq\/(\d+)(?:\/|$)/.exec(s);
+    return sq ? 'sq' + sq[1] : s;
   };
 
   TeslaPlayer.prototype.reanchor = function (s) {
