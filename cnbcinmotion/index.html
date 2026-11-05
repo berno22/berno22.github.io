@@ -160,6 +160,12 @@
   //   ?wc=0      - same as ?native=1 (alias)
   //   ?fps=N     - paint ceiling; 0 = uncapped
   //   ?flush=N   - periodic flush interval seconds (0 = off)
+  //   ?delay=N   - seconds behind live the whole player runs (default 30 on the
+  //                canvas path, 0 when WebCodecs is absent or ?native=1).
+  //                Being behind live is what makes a buffer possible at all:
+  //                content ahead of the playhead has to already exist, and for
+  //                a live stream it only exists behind the edge. Audio is
+  //                delayed too, by hls.js itself, so A/V stay locked.
   //   ?level=N   - force a variant index instead of the auto-picked 720p
   //   ?wd=N      - stall watchdog threshold seconds (8 default); 0 = off
   //   ?src=<url> - swap the m3u8 stream (url-encoded)
@@ -173,6 +179,7 @@
     native: Q.get('native') === '1' || Q.get('wc') === '0',
     fps: Q.has('fps') ? +Q.get('fps') : null,
     flushSec: Q.has('flush') ? +Q.get('flush') : null,
+    delaySec: Q.has('delay') ? +Q.get('delay') : null,
     level: Q.has('level') ? +Q.get('level') : null,
     wdSec: Q.has('wd') ? +Q.get('wd') : null
   };
@@ -564,9 +571,12 @@
   // no jumps, no deadlocks: with no interdependent clock state, decode
   // simply cannot starve itself.
   //
-  // Memory bound by construction: pend <=150 encoded chunks (~5s, each
-  // 10-100x smaller than decoded), box <=2 decoded 720p frames
-  // (~7MB), decoder queue <=6, fetch queue <=4 segments.
+  // Memory is bounded at the ENCODED level, which is the cheap one: pend holds
+  // ~WC_DELAY_S seconds of compressed chunks (measured 17.7MB for 29.4s at the
+  // auto-picked 720p variant), because a decoded buffer of that depth would be
+  // gigabytes. Only a ~300ms window near the playhead is decoded ahead (box),
+  // and the decoder queue stays shallow - so the depth of the buffer costs
+  // compressed bytes, not frames.
   const WC = {
     mbox: null, dec: null, cfg: null, active: false,
     filePos: 0, trackId: null, timescale: 90000,
@@ -600,7 +610,22 @@
   const WC_LEAD_MS = +(Q.get('lead') || 34);
   const WC_BOX = +(Q.get('box') || 16); // decoded frames held (mailbox depth)
   const WC_MODE = (Q.get('mode') || 'seq'); // 'seq' = sequential (proven), 'clock' = clock-matched deep buffer
-  const WC_FETCH_AHEAD = +(Q.get('fahead') || 1000); // ms ahead of clock to FETCH
+  // How far behind live the whole player sits. This is the knob that makes a
+  // buffer possible: a live stream has no content ahead of the edge, so the
+  // only way to hold ~30s of video ready is to play ~30s behind it. Audio is
+  // moved back by hls.js (liveSyncDuration below), so the canvas clock - which
+  // reads hls.playingDate - follows automatically and A/V stay locked.
+  // 0 disables the whole thing and restores the old near-live behaviour.
+  const WC_DELAY_S = TEST.delaySec != null ? Math.max(0, TEST.delaySec)
+    : (TEST.native || !('VideoDecoder' in window) ? 0 : 30);
+  // Fetch this far ahead of the playhead. With the playhead parked
+  // WC_DELAY_S behind live, aim + this reaches roughly the live edge, so the
+  // whole delay becomes buffered video rather than empty air.
+  const WC_FETCH_AHEAD = WC_DELAY_S > 0 ? WC_DELAY_S * 1000 + 5000
+                                        : +(Q.get('fahead') || 1000);
+  // Backstop on the encoded backlog (~30fps). Trimming is time-based (see
+  // wcOnSamples); this only exists so a runaway can never eat memory.
+  const WC_PEND_MAX = Math.max(150, Math.round(30 * (WC_DELAY_S + 10)));
   const WC_FRAME_MS = 1000 / 30; // source is 30fps; output walk step
   const WC_CATCHUP_MS = 120; // skip frames >120ms behind the clock to re-sync
   WC.frameDur = WC_FRAME_MS;
@@ -743,10 +768,19 @@
         raw: new Uint8Array(s.data.buffer.slice(s.data.byteOffset, s.data.byteOffset + s.data.byteLength))
       });
     }
-    // Bound the encoded backlog (~5s at 30fps). Drop oldest first, keys
-    // included - fresh keys arrive with every GOP, and hoarding ancient
-    // keys is how stale-GOP decode churn starts.
-    while (WC.pend.length > 150) { WC.pend.shift(); WC.dropped++; if (WC._dr) WC._dr.cap++; }
+    // Bound the encoded backlog by TIME, not by a count. The old cap was 150
+    // and shifted from the HEAD, which was harmless when only ~5s was ever
+    // fetched but becomes catastrophic with a deep buffer: pulling 30s in one
+    // go would immediately throw away 30s of the freshest video, i.e. exactly
+    // the part about to be played. Drop only what is already behind the
+    // playhead, and keep a generous absolute backstop for runaway safety.
+    const floorW = wcRefPdt() - 4000;
+    while (WC.pend.length && WC.pend[0].wpdt < floorW) {
+      WC.pend.shift(); WC.dropped++; if (WC._dr) WC._dr.past++;
+    }
+    while (WC.pend.length > WC_PEND_MAX) {
+      WC.pend.shift(); WC.dropped++; if (WC._dr) WC._dr.cap++;
+    }
     // mp4box.js keeps every parsed sample's bytes alive in its internal box
     // tree. releaseUsedSamples() tells it which samples we've already taken,
     // so the mdat buffers can be freed. Without this, the box tree grows
@@ -916,7 +950,7 @@
       // backlog head near now; the tail trim below absorbs the rest.
       if (s.pdt < minPdt || s.pdt > aim + WC_FETCH_AHEAD) continue;
       if (WC.segs[s.url]) continue;
-      if (WC.segQueue.length >= 6) break; // bounded: retry on next poll
+      if (WC.segQueue.length >= 12) break; // bounded: retry on next poll
       WC.segs[s.url] = true;
       wcFetchSeg(s.url, s.pdt);
     }
@@ -1314,12 +1348,27 @@
       // 45s back buffer, ABR capped to <=480p below, FPS-drop capping on.
       hls = new Hls({
         enableWorker: true,
-        liveSyncDurationCount: 3,
-        // Cap how far audio may trail live (~24s): beyond this hls.js jumps
-        // forward. Without a cap a slow join/stall leaves audio minutes
-        // behind live forever - and video glued to that audio starves, since
-        // the playlist DVR window only holds so much history.
-        liveMaxLatencyDurationCount: 6,
+        // Latency from the live edge, as ONE pair. hls.js refuses to run with
+        // both the fragment-count pair and the seconds pair set ("don't mix up
+        // liveSyncDurationCount/... and liveSyncDuration/..."), so this is an
+        // either/or spread rather than two defaults plus an override.
+        //
+        // Seconds are used when buffering, so the delay does not depend on the
+        // stream's target duration (?src can swap streams). liveSyncPosition -
+        // which the live-edge watcher compares against - then points WC_DELAY_S
+        // behind the edge, so the watcher does not fight the delay, and
+        // liveMaxLatencyDuration must exceed liveSyncDuration or hls.js would
+        // immediately drag playback forward.
+        //
+        // Without a delay, keep the original counts: ~12s behind live, capped
+        // at ~24s so a slow join cannot leave audio minutes behind forever.
+        ...(WC_DELAY_S > 0 ? {
+          liveSyncDuration: WC_DELAY_S,
+          liveMaxLatencyDuration: WC_DELAY_S + 30
+        } : {
+          liveSyncDurationCount: 3,
+          liveMaxLatencyDurationCount: 6
+        }),
         maxBufferLength: 12,
         maxBufferSize: 25 * 1000 * 1000,
         maxMaxBufferLength: 60,
