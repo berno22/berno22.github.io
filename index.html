@@ -3,11 +3,15 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#e8e8e8" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#101010" media="(prefers-color-scheme: dark)">
     <title>berno22</title>
     <style>
       :root {
+        color-scheme: light;
         --bg: #e8e8e8;
         --surface: #ffffff;
+        --surface-hover: #f5f5f5;
         --text: #1a1a1a;
         --muted: #777777;
         --line: #d0d0d0;
@@ -16,6 +20,24 @@
            so a logo reads as part of its label rather than as a competing
            element. --text is still used for hover and for the All Media link. */
         --mark: #555555;
+        --shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+        --shadow-hover: 0 8px 20px rgba(0, 0, 0, 0.08);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          color-scheme: dark;
+          --bg: #101010;
+          --surface: #1b1b1b;
+          --surface-hover: #272727;
+          --text: #f2f2f2;
+          --muted: #9a9a9a;
+          --line: #343434;
+          --accent: #f2f2f2;
+          --mark: #b8b8b8;
+          --shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+          --shadow-hover: 0 10px 28px rgba(0, 0, 0, 0.55);
+        }
       }
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body {
@@ -50,7 +72,7 @@
         font-weight: 600;
         letter-spacing: 0.04em;
         text-align: center;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+        box-shadow: var(--shadow);
         transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s,
                     color 0.25s, background 0.25s;
       }
@@ -66,9 +88,9 @@
       }
       a:hover {
         border-color: var(--accent);
-        background: #f5f5f5;
+        background: var(--surface-hover);
         transform: translateY(-2px);
-        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        box-shadow: var(--shadow-hover);
       }
       a:hover::after {
         opacity: 1;
@@ -206,7 +228,7 @@
       .split > .fs:hover {
         color: var(--text);
         border-color: var(--line);
-        background: #f5f5f5;
+        background: var(--surface-hover);
         /* Keep the vertical centring: the base hover lifts by 2px, which would
            knock the glyph out of line with the label. */
         transform: translateY(-50%);
