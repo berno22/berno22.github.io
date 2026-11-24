@@ -484,32 +484,140 @@
     evaluateBreak();
   }
 
-  function start() {
-    startLoFi();
-    if (window.Hls && Hls.isSupported()) {
+  // ---- fatal hls.js recovery ------------------------------------------------
+  // A MediaSource can be torn down while the element is still attached, which
+  // hls.js reports as { type: 'mediaError', details:
+  // 'mediaSourceRequiresReset', fatal: true } - literally "MediaSource closed
+  // while media attached". This page used to print that and stop, so the
+  // picture went black with no sound and the only way out was a reload.
+  //
+  // Recover in escalating steps instead:
+  //   1st media fault -> hls.recoverMediaError(), i.e. hls.js resets the MSE
+  //   a second one soon after -> rebuild the whole hls instance from scratch
+  // Network faults get startLoad() retries first, for the same reason.
+  //
+  // The <video> element is always REUSED, never replaced: enableBoost() has
+  // attached a MediaElementAudioSourceNode to it, and createMediaElementSource
+  // throws InvalidStateError if it is ever called twice on one element. So a
+  // rebuild tears down hls only; the element and its audio graph stay put.
+  const RECOVER_WINDOW_MS = 45000;
+  const MAX_REBUILDS = 6;
+  let mediaFaults = 0, netFaults = 0, lastFaultAt = 0;
+  let rebuilds = 0, rebuildsStart = 0, rebuilding = false;
+
+  function hlsConfig() {
+    return {
       // Picture-quality tuning: default ABR opens at 512x288 and climbs
       // slowly, which reads as persistent pixelation. Ladder is 0..6
       // (288p..1080p60), so open at 720p, assume broadband until measured,
       // climb back up fast after dips, and never auto-drop below 960x540.
-      hls = new Hls({
-        enableWorker: true,
-        startLevel: 4,
-        abrEwmaDefaultEstimate: 5000000,
-        abrBandWidthFactor: 0.9,
-        abrBandWidthUpFactor: 0.8,
-        minAutoLevel: 2,
+      enableWorker: true,
+      startLevel: 4,
+      abrEwmaDefaultEstimate: 5000000,
+      abrBandWidthFactor: 0.9,
+      abrBandWidthUpFactor: 0.8,
+      minAutoLevel: 2,
+      // Bounded MSE footprint. The defaults keep 30s forward and the whole
+      // back buffer forever, which is far more than a live channel needs -
+      // and an over-full SourceBuffer is one of the things that makes the
+      // browser close the MediaSource in the first place.
+      maxBufferLength: 12,
+      maxBufferSize: 25 * 1000 * 1000,
+      maxMaxBufferLength: 60,
+      backBufferLength: 45
+    };
+  }
+
+  function clearError() {
+    if (errBox && errBox.textContent) errBox.textContent = '';
+  }
+
+  function createHls() {
+    hls = new Hls(hlsConfig());
+    hls.subtitleDisplay = false;
+    hls.subtitleTrack = -1;
+    hls.on(Hls.Events.ERROR, onHlsError);
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      clearError();
+      // Do not call tryAutoplay() unconditionally: it force-mutes the element,
+      // which would silently kill the sound after a rebuild for a user who had
+      // already tapped for it.
+      if (soundOn) { video.muted = false; video.play().catch(() => {}); }
+      else tryAutoplay();
+    });
+    hls.on(Hls.Events.LEVEL_LOADED, (_, data) => onLevel(data));
+    hls.on(Hls.Events.LEVEL_UPDATED, (_, data) => onLevel(data));
+    hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, disableSubtitles);
+    hls.on(Hls.Events.FRAG_BUFFERED, clearError);
+    hls.loadSource(src);
+    hls.attachMedia(video);
+  }
+
+  function onHlsError(_, data) {
+    if (!data.fatal) return;
+    setError(data.type + ': ' + data.details);
+    const now = Date.now();
+    const within = now - lastFaultAt < RECOVER_WINDOW_MS;
+    lastFaultAt = now;
+
+    if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+      netFaults = within ? netFaults + 1 : 1;
+      // Two resumptions are worth trying before paying for a full rebuild.
+      if (netFaults <= 2) { try { hls.startLoad(); return; } catch (e) {} }
+      return rebuildHls();
+    }
+    if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+      mediaFaults = within ? mediaFaults + 1 : 1;
+      // recoverMediaError() is exactly what this detail asks for; only reach
+      // for a rebuild if the reset itself did not hold.
+      if (mediaFaults === 1) {
+        try { hls.recoverMediaError(); return; } catch (e) {}
+      }
+      return rebuildHls();
+    }
+    rebuildHls();
+  }
+
+  function rebuildHls() {
+    if (rebuilding) return;
+    const now = Date.now();
+    if (now - rebuildsStart > 120000) { rebuildsStart = now; rebuilds = 0; }
+    if (++rebuilds > MAX_REBUILDS) {
+      // Stop rather than loop: a stream this unhappy needs a fresh page.
+      setError('stream keeps failing to reset - reload the page');
+      return;
+    }
+    rebuilding = true;
+    mediaFaults = 0;
+    netFaults = 0;
+    try { if (hls) hls.destroy(); } catch (e) {}
+    hls = null;
+    setTimeout(() => {
+      rebuilding = false;
+      if (!window.Hls || !Hls.isSupported()) return;
+      createHls();
+      // Rejoin at the live edge rather than wherever the dead MSE stopped.
+      // liveSyncPosition does not exist until a level has loaded, so wait for
+      // the first LEVEL_LOADED and then jump.
+      let joined = false;
+      hls.on(Hls.Events.LEVEL_LOADED, () => {
+        if (joined) return;
+        joined = true;
+        setTimeout(() => {
+          try {
+            if (hls && hls.liveSyncPosition != null) video.currentTime = hls.liveSyncPosition;
+          } catch (e) {}
+          video.play().catch(() => {});
+          evaluateBreak();
+        }, 150);
       });
-      hls.subtitleDisplay = false;
-      hls.subtitleTrack = -1;
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) setError(data.type + ': ' + data.details);
-      });
-      hls.on(Hls.Events.MANIFEST_PARSED, tryAutoplay);
-      hls.on(Hls.Events.LEVEL_LOADED, (_, data) => onLevel(data));
-      hls.on(Hls.Events.LEVEL_UPDATED, (_, data) => onLevel(data));
-      hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, disableSubtitles);
-      hls.loadSource(src);
-      hls.attachMedia(video);
+    }, 1200);
+  }
+
+  function start() {
+    startLoFi();
+    if (window.Hls && Hls.isSupported()) {
+      createHls();
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = src;
       video.addEventListener('loadedmetadata', tryAutoplay);
